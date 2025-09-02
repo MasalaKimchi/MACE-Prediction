@@ -1,0 +1,5 @@
+---
+description: The project intends to utilize CT calcium score scans for Major adverse cardiovascular risk prediction. We intend to pretrain an image encoder like ResNet to predict tabular features such as - clinical variables, Agatston scores, calcium-omics. We hypothesize 1) pretraining will improve the downstream task of time-to-event modeling to predict risk to MACE than using conventional random weight or ImageNet pretrained weight.  
+globs:
+alwaysApply: true
+---
