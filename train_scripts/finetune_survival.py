@@ -8,8 +8,8 @@ import torch.optim as optim
 from torch.nn.parallel import DataParallel
 from torch.utils.data import DataLoader
 
-from dataset import MonaiSurvivalDataset
-from network import build_network
+from dataloaders import MonaiSurvivalDataset
+from architectures import build_network
 
 # Optional: use torchsurv package metrics if available (class-based API)
 try:

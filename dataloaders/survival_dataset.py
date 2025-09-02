@@ -3,7 +3,7 @@ import torch
 import numpy as np
 from torch.utils.data import Dataset
 from typing import List, Optional, Tuple, Callable, Any
-from preprocessing import load_survival_dataset_from_csv, preprocess_features
+from data.preprocessing import load_survival_dataset_from_csv, preprocess_features
 from monai.transforms import (
     LoadImage, Compose, Resize, RandFlip, RandRotate90, ScaleIntensityRange, EnsureType,
     LoadImaged, ScaleIntensityRanged, Resized, RandFlipd, RandRotate90d, EnsureTyped

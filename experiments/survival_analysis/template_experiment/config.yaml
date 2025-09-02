@@ -1,0 +1,61 @@
+# Survival Analysis Experiment Configuration
+# Based on SegFormer3D compartmentalized structure
+
+# Dataset configuration
+dataset:
+  train_csv: "path/to/train.csv"
+  val_csv: "path/to/val.csv"
+  dicom_col: "Dicom path"
+  time_col: "time"
+  event_col: "event"
+  feature_cols: null  # Use all except dicom, time, event
+  categorical_cols: null  # Auto-detect
+  numerical_cols: null  # Auto-detect
+  image_size: [256, 256, 64]
+  use_cache: false
+  augment: true
+  cache_rate: 1.0
+  num_workers: 4
+
+# Model configuration
+model:
+  architecture: "resnet18"  # resnet18, resnet34, resnet50, resnet101, resnet152
+  in_channels: 1
+  num_classes: 1
+  init_mode: "random"  # random, pretrained
+  pretrained_path: ""
+
+# Training configuration
+training:
+  batch_size: 6
+  epochs: 50
+  learning_rate: 1e-4
+  weight_decay: 1e-5
+  optimizer: "adamw"  # adamw, adam, sgd
+  freeze_epochs: 0  # Freeze encoder for N warmup epochs
+  amp: false  # Mixed precision
+  compile: false  # torch.compile
+
+# DataLoader configuration
+dataloader:
+  num_workers: 8
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4
+
+# Evaluation configuration
+evaluation:
+  eval_years: [1, 2, 3, 4, 5]  # Years at which to compute metrics
+
+# Logging configuration
+logging:
+  log_dir: "finetune_logs"
+  output_path: "finetune_logs/finetuned_model.pth"
+  tensorboard: true
+
+# Wandb configuration (optional)
+wandb:
+  mode: "offline"  # offline, online
+  entity: ""
+  project: "survival-analysis"
+  name: "survival_experiment"

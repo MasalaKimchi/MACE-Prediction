@@ -5,8 +5,8 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torch.nn.parallel import DataParallel
 from torch.utils.tensorboard import SummaryWriter
-from dataset import MonaiSurvivalDataset
-from network import build_network
+from dataloaders import MonaiSurvivalDataset
+from architectures import build_network
 import os
 
 
