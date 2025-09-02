@@ -106,7 +106,8 @@ class MonaiSurvivalDataset:
         image_transform: Optional[Callable[[Any], Any]] = None,
         use_cache: bool = True,
         cache_rate: float = 1.0,
-        num_workers: int = 4
+        num_workers: int = 4,
+        fitted_scaler: Optional[object] = None
     ):
         features, time, event, dicom_paths = load_survival_dataset_from_csv(
             csv_path,
@@ -115,7 +116,10 @@ class MonaiSurvivalDataset:
             event_col=event_col,
             feature_cols=feature_cols
         )
-        features = preprocess_features(features, categorical_cols, numerical_cols)
+        features, self.feature_scaler = preprocess_features(
+            features, categorical_cols, numerical_cols, 
+            fitted_scaler=fitted_scaler, return_scaler=True
+        )
         features_arr = features.to_numpy()
         time_arr = time.to_numpy()
         event_arr = event.to_numpy()
@@ -158,6 +162,10 @@ class MonaiSurvivalDataset:
 
     def __len__(self):
         return len(self.dataset)
+    
+    def get_feature_scaler(self):
+        """Get the fitted feature scaler for saving/loading."""
+        return self.feature_scaler
 
     def __getitem__(self, idx):
         item = self.dataset[idx]

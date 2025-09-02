@@ -31,7 +31,7 @@ from metrics import (
     integrated_brier_score,
     time_dependent_auc
 )
-from optimizers import create_optimizer
+from optimizers import create_optimizer_and_scheduler
 
 
 def load_config(config_path: str) -> dict:
@@ -210,14 +210,20 @@ def main():
     # Create model
     model = create_model(config, device)
     
-    # Create optimizer
+    # Create optimizer and scheduler
     training_config = config['training']
-    optimizer = create_optimizer(
+    optimizer, scheduler = create_optimizer_and_scheduler(
         model.parameters(),
         optimizer_name=training_config['optimizer'],
         lr=training_config['learning_rate'],
-        weight_decay=training_config['weight_decay']
+        weight_decay=training_config['weight_decay'],
+        scheduler_name=training_config.get('scheduler', 'cosine'),
+        epochs=training_config['epochs'],
+        eta_min=training_config.get('eta_min', 1e-7)
     )
+    
+    # Create mixed precision scaler
+    scaler = torch.cuda.amp.GradScaler(enabled=training_config['amp']) if training_config['amp'] else None
     
     # Optional tensorboard logging
     writer = SummaryWriter(log_dir=log_dir) if config['logging']['tensorboard'] else None
@@ -241,12 +247,17 @@ def main():
         # Run epochs
         train_loss, train_c = run_epoch(
             model, train_loader, device, optimizer, 
-            amp=training_config['amp']
+            amp=training_config['amp'], scaler=scaler,
+            max_grad_norm=training_config.get('max_grad_norm', 1.0)
         )
         val_loss, val_c, v_times, v_events, v_risks = run_epoch(
             model, val_loader, device, optimizer=None, 
             return_collections=True, amp=training_config['amp']
         )
+        
+        # Step scheduler
+        if scheduler is not None:
+            scheduler.step()
         
         # Compute additional metrics
         v_event_times, v_H0 = estimate_breslow_baseline(v_times, v_events, v_risks)

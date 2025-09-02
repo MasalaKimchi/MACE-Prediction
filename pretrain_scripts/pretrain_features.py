@@ -7,6 +7,7 @@ from torch.nn.parallel import DataParallel
 from torch.utils.tensorboard import SummaryWriter
 from dataloaders import MonaiSurvivalDataset
 from architectures import build_network
+from optimizers import create_optimizer_and_scheduler
 import os
 
 
@@ -27,6 +28,16 @@ def parse_args():
     parser.add_argument('--prefetch_factor', type=int, default=4, help='DataLoader prefetch factor')
     parser.add_argument('--persistent_workers', action='store_true', help='Use persistent workers in DataLoader')
     parser.add_argument('--pin_memory', action='store_true', help='Pin memory in DataLoader')
+    parser.add_argument('--optimizer', type=str, default='adamw', 
+                       choices=['adamw', 'adam', 'sgd'], help='Optimizer type')
+    parser.add_argument('--scheduler', type=str, default='cosine', 
+                       choices=['cosine', 'cosine_warm_restarts', 'onecycle', 'none'], 
+                       help='Learning rate scheduler')
+    parser.add_argument('--max_grad_norm', type=float, default=1.0, 
+                       help='Maximum gradient norm for clipping (0 to disable)')
+    parser.add_argument('--eta_min', type=float, default=1e-7, 
+                       help='Minimum learning rate for cosine scheduler')
+    parser.add_argument('--weight_decay', type=float, default=1e-5, help='Weight decay')
     return parser.parse_args()
 
 
@@ -54,6 +65,9 @@ def main():
         use_cache=False,  # For large datasets, avoid caching all in RAM
         augment=True
     )
+    
+    # Get the fitted feature scaler for saving
+    feature_scaler = dataset.get_feature_scaler()
     loader = DataLoader(
         dataset,
         batch_size=args.batch_size,
@@ -80,7 +94,17 @@ def main():
         except Exception as e:
             print(f'torch.compile not available: {e}')
 
-    optimizer = optim.AdamW(model.parameters(), lr=args.lr)
+    # Create optimizer and scheduler
+    optimizer, scheduler = create_optimizer_and_scheduler(
+        model.parameters(),
+        optimizer_name=args.optimizer,
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+        scheduler_name=args.scheduler,
+        epochs=args.epochs,
+        eta_min=args.eta_min
+    )
+    
     criterion = nn.MSELoss()
     scaler = torch.cuda.amp.GradScaler(enabled=args.amp)
 
@@ -99,27 +123,46 @@ def main():
                 outputs = model(images)
                 loss = criterion(outputs, features)
             scaler.scale(loss).backward()
+            if args.max_grad_norm > 0:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.max_grad_norm)
             scaler.step(optimizer)
             scaler.update()
             running_loss += loss.item() * images.size(0)
         avg_loss = running_loss / len(dataset)
         print(f"Epoch {epoch+1}/{args.epochs} - Loss: {avg_loss:.4f}")
         writer.add_scalar('Loss/train', avg_loss, epoch + 1)
+        
+        # Step scheduler
+        if scheduler is not None:
+            scheduler.step()
+            current_lr = optimizer.param_groups[0]['lr']
+            writer.add_scalar('Learning_Rate', current_lr, epoch + 1)
 
         # Save checkpoint if best loss
         if avg_loss < best_loss:
             best_loss = avg_loss
-            if isinstance(model, DataParallel):
-                torch.save(model.module.state_dict(), checkpoint_path)
-            else:
-                torch.save(model.state_dict(), checkpoint_path)
+            checkpoint_data = {
+                'model_state_dict': model.module.state_dict() if isinstance(model, DataParallel) else model.state_dict(),
+                'feature_scaler': feature_scaler,
+                'feature_columns': args.feature_cols,
+                'resnet_type': args.resnet,
+                'epoch': epoch + 1,
+                'loss': avg_loss
+            }
+            torch.save(checkpoint_data, checkpoint_path)
             print(f"Saved new best model checkpoint to {checkpoint_path}")
 
     # Save final model
-    if isinstance(model, DataParallel):
-        torch.save(model.module.state_dict(), args.output)
-    else:
-        torch.save(model.state_dict(), args.output)
+    final_model_data = {
+        'model_state_dict': model.module.state_dict() if isinstance(model, DataParallel) else model.state_dict(),
+        'feature_scaler': feature_scaler,
+        'feature_columns': args.feature_cols,
+        'resnet_type': args.resnet,
+        'epoch': args.epochs,
+        'loss': avg_loss
+    }
+    torch.save(final_model_data, args.output)
     print(f"Pretrained model saved to {args.output}")
     writer.close()
 

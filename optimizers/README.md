@@ -1,10 +1,10 @@
 # Optimizers
 
-This folder contains optimizer configurations and factory for training survival analysis models.
+This folder contains optimizer configurations and factory for training survival analysis models with advanced optimization techniques.
 
 ## Overview
 
-The optimizers module provides a comprehensive optimizer factory and configuration system for training deep survival models. It supports various optimization algorithms with medical imaging-specific configurations and learning rate scheduling strategies.
+The optimizers module provides a comprehensive optimizer factory and configuration system for training deep survival models. It supports various optimization algorithms with medical imaging-specific configurations, learning rate scheduling strategies, and mixed precision training support.
 
 ## Available Components
 
@@ -14,11 +14,12 @@ Main optimizer factory providing easy configuration and instantiation of optimiz
 
 #### Key Features
 
-- **Multiple Optimizers**: Support for Adam, AdamW, SGD, RMSprop, and more
-- **Learning Rate Scheduling**: Built-in support for various LR schedulers
-- **Medical Imaging Optimized**: Configurations optimized for medical imaging tasks
+- **Multiple Optimizers**: Support for Adam, AdamW, SGD with optimized configurations
+- **Advanced Schedulers**: Cosine annealing, warm restarts, onecycle policy
+- **Mixed Precision Support**: Automatic mixed precision training with gradient scaling
+- **Gradient Clipping**: Built-in gradient clipping for training stability
 - **Easy Configuration**: YAML-based configuration system
-- **Gradient Clipping**: Built-in gradient clipping for stable training
+- **Performance Optimized**: Configurations optimized for medical imaging tasks
 
 ## Supported Optimizers
 
@@ -31,12 +32,10 @@ from optimizers import create_optimizer
 
 # Create Adam optimizer
 optimizer = create_optimizer(
-    model=model,
-    optimizer_type='adam',
-    learning_rate=1e-4,
-    weight_decay=1e-5,
-    betas=(0.9, 0.999),
-    eps=1e-8
+    model.parameters(),
+    optimizer_name='adam',
+    lr=1e-4,
+    weight_decay=1e-5
 )
 ```
 
@@ -45,14 +44,12 @@ optimizer = create_optimizer(
 Improved version of Adam with decoupled weight decay.
 
 ```python
-# Create AdamW optimizer
+# Create AdamW optimizer (recommended)
 optimizer = create_optimizer(
-    model=model,
-    optimizer_type='adamw',
-    learning_rate=1e-4,
-    weight_decay=1e-4,
-    betas=(0.9, 0.999),
-    eps=1e-8
+    model.parameters(),
+    optimizer_name='adamw',
+    lr=1e-4,
+    weight_decay=1e-4
 )
 ```
 
@@ -63,12 +60,11 @@ Stochastic Gradient Descent with momentum, often used for fine-tuning.
 ```python
 # Create SGD optimizer
 optimizer = create_optimizer(
-    model=model,
-    optimizer_type='sgd',
-    learning_rate=1e-3,
-    momentum=0.9,
+    model.parameters(),
+    optimizer_name='sgd',
+    lr=1e-3,
     weight_decay=1e-4,
-    nesterov=True
+    momentum=0.9
 )
 ```
 
@@ -90,33 +86,51 @@ optimizer = create_optimizer(
 
 ## Learning Rate Schedulers
 
-### StepLR Scheduler
+### Cosine Annealing Scheduler (Recommended)
 
-Reduces learning rate by a factor at specified epochs.
+Smoothly decreases learning rate following cosine curve for better convergence.
 
 ```python
 from optimizers import create_scheduler
 
-# Create StepLR scheduler
+# Create cosine annealing scheduler
 scheduler = create_scheduler(
     optimizer=optimizer,
-    scheduler_type='steplr',
-    step_size=30,
-    gamma=0.1
+    scheduler_name='cosine',
+    epochs=100,
+    eta_min=1e-7
 )
 ```
 
-### CosineAnnealingLR Scheduler
+### Cosine Annealing with Warm Restarts
 
-Cosine annealing learning rate schedule.
+Cosine annealing with periodic warm restarts for better exploration.
 
 ```python
-# Create CosineAnnealingLR scheduler
+# Create cosine annealing with warm restarts
 scheduler = create_scheduler(
     optimizer=optimizer,
-    scheduler_type='cosine',
-    T_max=100,
-    eta_min=1e-6
+    scheduler_name='cosine_warm_restarts',
+    epochs=100,
+    T_0=25,  # Restart every 25 epochs
+    T_mult=2,  # Double the restart period
+    eta_min=1e-7
+)
+```
+
+### OneCycle Policy
+
+Aggressive training schedule with high learning rates.
+
+```python
+# Create onecycle scheduler
+scheduler = create_scheduler(
+    optimizer=optimizer,
+    scheduler_name='onecycle',
+    epochs=100,
+    max_lr=1e-3,  # Peak learning rate
+    steps_per_epoch=100,
+    pct_start=0.3  # 30% of training for warmup
 )
 ```
 
@@ -151,53 +165,75 @@ scheduler = create_scheduler(
 )
 ```
 
-## Optimizer Factory
+## Combined Optimizer and Scheduler
 
-### Basic Usage
+### Recommended Usage
 
 ```python
-from optimizers import OptimizerFactory
+from optimizers import create_optimizer_and_scheduler
 
-# Create factory
-factory = OptimizerFactory()
-
-# Create optimizer
-optimizer = factory.create_optimizer(
-    model=model,
-    config={
-        'type': 'adam',
-        'learning_rate': 1e-4,
-        'weight_decay': 1e-5
-    }
+# Create both optimizer and scheduler together
+optimizer, scheduler = create_optimizer_and_scheduler(
+    model.parameters(),
+    optimizer_name='adamw',
+    lr=1e-4,
+    weight_decay=1e-4,
+    scheduler_name='cosine',
+    epochs=100,
+    eta_min=1e-7
 )
 ```
 
 ### Advanced Configuration
 
 ```python
-# Advanced optimizer configuration
+# Advanced configuration with all options
+optimizer, scheduler = create_optimizer_and_scheduler(
+    model.parameters(),
+    optimizer_name='adamw',
+    lr=1e-4,
+    weight_decay=1e-4,
+    scheduler_name='cosine_warm_restarts',
+    epochs=100,
+    T_0=25,
+    T_mult=2,
+    eta_min=1e-7
+)
+```
+
+## Configuration Examples
+
+### YAML Configuration
+
+```yaml
+# config.yaml
+training:
+  optimizer: "adamw"
+  scheduler: "cosine"
+  learning_rate: 1e-4
+  weight_decay: 1e-4
+  eta_min: 1e-7
+  max_grad_norm: 1.0
+  amp: true
+  compile: true
+```
+
+### Python Configuration
+
+```python
+# Python configuration
 config = {
-    'optimizer': {
-        'type': 'adamw',
-        'learning_rate': 1e-4,
-        'weight_decay': 1e-4,
-        'betas': [0.9, 0.999],
-        'eps': 1e-8
-    },
-    'scheduler': {
-        'type': 'cosine',
-        'T_max': 100,
-        'eta_min': 1e-6
-    },
-    'gradient_clipping': {
-        'enabled': True,
-        'max_norm': 1.0
-    }
+    'optimizer_name': 'adamw',
+    'lr': 1e-4,
+    'weight_decay': 1e-4,
+    'scheduler_name': 'cosine',
+    'epochs': 100,
+    'eta_min': 1e-7
 }
 
-optimizer, scheduler = factory.create_optimizer_and_scheduler(
-    model=model,
-    config=config
+optimizer, scheduler = create_optimizer_and_scheduler(
+    model.parameters(),
+    **config
 )
 ```
 
