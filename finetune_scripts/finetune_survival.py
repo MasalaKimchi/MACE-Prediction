@@ -75,6 +75,7 @@ def parse_args():
 def create_dataloaders(args):
     """Create training and validation dataloaders."""
     common_ds_kwargs = dict(
+        nifti_col='NIFTI path',  # Default NIFTI column name
         image_size=tuple(args.image_size), 
         use_cache=False, 
         augment=True

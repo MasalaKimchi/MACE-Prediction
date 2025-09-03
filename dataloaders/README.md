@@ -29,7 +29,7 @@ from torch.utils.data import DataLoader
 # Create dataset
 dataset = SurvivalDataset(
     csv_path='data/train.csv',
-    image_col='image_path',
+    nifti_col='NIFTI path',
     time_col='survival_time',
     event_col='event',
     transform=transforms,
@@ -62,7 +62,7 @@ The dataset expects a CSV file with the following columns:
 | Column | Description | Type | Example |
 |--------|-------------|------|---------|
 | `patient_id` | Unique patient identifier | string | "P001" |
-| `image_path` | Path to 3D medical image | string | "/data/images/P001.nii.gz" |
+| `NIFTI path` | Path to 3D NIFTI medical image | string | "/data/images/P001.nii.gz" |
 | `survival_time` | Time to event or censoring | float | 365.5 |
 | `event` | Event indicator (1=event, 0=censored) | int | 1 |
 
@@ -102,7 +102,7 @@ The dataset expects a CSV file with the following columns:
 ```python
 dataset = SurvivalDataset(
     csv_path='data/train.csv',           # Path to CSV file
-    image_col='image_path',              # Column name for image paths
+    nifti_col='NIFTI path',              # Column name for NIFTI image paths
     time_col='survival_time',            # Column name for survival times
     event_col='event',                   # Column name for event indicators
     transform=transforms,                # MONAI transforms pipeline
@@ -219,7 +219,7 @@ for epoch in range(num_epochs):
 dataset:
   train_csv: "data/train.csv"
   val_csv: "data/val.csv"
-  image_col: "image_path"
+  nifti_col: "NIFTI path"
   time_col: "survival_time"
   event_col: "event"
   cache_rate: 0.1

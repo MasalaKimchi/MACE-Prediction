@@ -14,7 +14,7 @@ from data import load_survival_dataset_from_csv, preprocess_features
 def create_dummy_csv(tmp_dir, n_samples=5):
     """Create dummy CSV file for testing."""
     df = pd.DataFrame({
-        "Dicom path": [f"dicom_{i}" for i in range(n_samples)],
+        "NIFTI path": [f"nifti_{i}.nii.gz" for i in range(n_samples)],
         "time": np.random.randint(1, 100, size=n_samples),
         "event": np.random.randint(0, 2, size=n_samples),
         "feature1": np.random.randn(n_samples),
@@ -33,18 +33,19 @@ def test_load_survival_dataset():
         csv_path = create_dummy_csv(tmp_dir)
         
         # Test with all features
-        features, time, event, dicom_paths = load_survival_dataset_from_csv(
+        features, time, event, nifti_paths = load_survival_dataset_from_csv(
             csv_path, 
+            nifti_col="NIFTI path",  # Use NIFTI column
             feature_cols=["feature1", "feature2", "categorical_feature", "numerical_feature"]
         )
         
-        print(f"Loaded dataset: features={features.shape}, time={time.shape}, event={event.shape}, dicom_paths={dicom_paths.shape}")
+        print(f"Loaded dataset: features={features.shape}, time={time.shape}, event={event.shape}, nifti_paths={nifti_paths.shape}")
         
         # Verify shapes
         assert len(features) == 5, f"Expected 5 samples, got {len(features)}"
         assert len(time) == 5, f"Expected 5 time values, got {len(time)}"
         assert len(event) == 5, f"Expected 5 event values, got {len(event)}"
-        assert len(dicom_paths) == 5, f"Expected 5 dicom paths, got {len(dicom_paths)}"
+        assert len(nifti_paths) == 5, f"Expected 5 nifti paths, got {len(nifti_paths)}"
         
         # Verify column names
         expected_cols = ["feature1", "feature2", "categorical_feature", "numerical_feature"]
@@ -57,8 +58,9 @@ def test_load_survival_dataset_subset():
         csv_path = create_dummy_csv(tmp_dir)
         
         # Test with subset of features
-        features, time, event, dicom_paths = load_survival_dataset_from_csv(
+        features, time, event, nifti_paths = load_survival_dataset_from_csv(
             csv_path, 
+            nifti_col="NIFTI path",  # Use NIFTI column
             feature_cols=["feature1", "feature2"]
         )
         
@@ -73,8 +75,9 @@ def test_preprocess_features_numerical_only():
     """Test preprocessing with numerical features only."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         csv_path = create_dummy_csv(tmp_dir)
-        features, time, event, dicom_paths = load_survival_dataset_from_csv(
+        features, time, event, nifti_paths = load_survival_dataset_from_csv(
             csv_path, 
+            nifti_col="NIFTI path",  # Use NIFTI column
             feature_cols=["feature1", "feature2", "numerical_feature"]
         )
         
@@ -98,8 +101,9 @@ def test_preprocess_features_categorical_only():
     """Test preprocessing with categorical features only."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         csv_path = create_dummy_csv(tmp_dir)
-        features, time, event, dicom_paths = load_survival_dataset_from_csv(
+        features, time, event, nifti_paths = load_survival_dataset_from_csv(
             csv_path, 
+            nifti_col="NIFTI path",  # Use NIFTI column
             feature_cols=["categorical_feature"]
         )
         
@@ -123,8 +127,9 @@ def test_preprocess_features_mixed():
     """Test preprocessing with both categorical and numerical features."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         csv_path = create_dummy_csv(tmp_dir)
-        features, time, event, dicom_paths = load_survival_dataset_from_csv(
+        features, time, event, nifti_paths = load_survival_dataset_from_csv(
             csv_path, 
+            nifti_col="NIFTI path",  # Use NIFTI column
             feature_cols=["feature1", "feature2", "categorical_feature", "numerical_feature"]
         )
         
@@ -152,8 +157,9 @@ def test_preprocess_features_auto_inference():
     """Test preprocessing with automatic column type inference."""
     with tempfile.TemporaryDirectory() as tmp_dir:
         csv_path = create_dummy_csv(tmp_dir)
-        features, time, event, dicom_paths = load_survival_dataset_from_csv(
+        features, time, event, nifti_paths = load_survival_dataset_from_csv(
             csv_path, 
+            nifti_col="NIFTI path",  # Use NIFTI column
             feature_cols=["feature1", "feature2", "categorical_feature", "numerical_feature"]
         )
         
@@ -174,8 +180,9 @@ def test_end_to_end_preprocessing():
         csv_path = create_dummy_csv(tmp_dir)
         
         # Load and preprocess
-        features, time, event, dicom_paths = load_survival_dataset_from_csv(
+        features, time, event, nifti_paths = load_survival_dataset_from_csv(
             csv_path, 
+            nifti_col="NIFTI path",  # Use NIFTI column
             feature_cols=["feature1", "feature2", "categorical_feature", "numerical_feature"]
         )
         processed_features = preprocess_features(
@@ -188,10 +195,10 @@ def test_end_to_end_preprocessing():
         print(f"  Features: {processed_features.shape}")
         print(f"  Time: {time.shape}")
         print(f"  Event: {event.shape}")
-        print(f"  DICOM paths: {dicom_paths.shape}")
+        print(f"  NIFTI paths: {nifti_paths.shape}")
         
         # Verify all components
-        assert processed_features.shape[0] == len(time) == len(event) == len(dicom_paths), "All components should have same length"
+        assert processed_features.shape[0] == len(time) == len(event) == len(nifti_paths), "All components should have same length"
 
 
 def main():

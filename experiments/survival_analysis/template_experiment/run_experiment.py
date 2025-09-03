@@ -47,7 +47,7 @@ def create_dataloaders(config: dict) -> tuple:
     
     # Common dataset kwargs
     common_kwargs = {
-        'dicom_col': dataset_config['dicom_col'],
+        'nifti_col': dataset_config['nifti_col'],
         'time_col': dataset_config['time_col'],
         'event_col': dataset_config['event_col'],
         'feature_cols': dataset_config['feature_cols'],
