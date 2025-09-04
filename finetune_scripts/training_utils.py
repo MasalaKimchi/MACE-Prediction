@@ -7,13 +7,17 @@ import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.nn.parallel import DataParallel
+from torch.nn.parallel import DataParallel, DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 
 from architectures import build_network
 from survival_utils import cox_ph_loss
 from metrics_utils import concordance_index
 from optimizers import create_optimizer_and_scheduler
+from distributed_utils import (
+    setup_ddp_model, reduce_tensor, synchronize_distributed,
+    get_optimal_batch_size_per_gpu, get_optimal_num_workers
+)
 
 
 def load_model(resnet_type: str, init_mode: str, pretrained_path: str, device: torch.device) -> nn.Module:
@@ -54,9 +58,9 @@ def load_model(resnet_type: str, init_mode: str, pretrained_path: str, device: t
 
 def run_epoch(model: nn.Module, loader: DataLoader, device: torch.device, 
               optimizer=None, return_collections: bool = False, amp: bool = False,
-              scaler=None, max_grad_norm: float = None):
+              scaler=None, max_grad_norm: float = None, is_distributed: bool = False):
     """
-    Run one epoch of training or validation.
+    Run one epoch of training or validation with distributed training support.
     
     Args:
         model: Model to train/evaluate
@@ -67,6 +71,7 @@ def run_epoch(model: nn.Module, loader: DataLoader, device: torch.device,
         amp: Whether to use mixed precision
         scaler: GradScaler for mixed precision (required if amp=True)
         max_grad_norm: Maximum gradient norm for clipping (None to disable)
+        is_distributed: Whether running in distributed mode
     
     Returns:
         If return_collections=False: (avg_loss, c_index)
@@ -88,6 +93,8 @@ def run_epoch(model: nn.Module, loader: DataLoader, device: torch.device,
     for batch in loader:
         # Dataset returns: features, time, event, image, dicom_path
         _, times, events, images, _ = batch
+        
+        # Move to device (non_blocking for better performance)
         images = images.to(device, non_blocking=True)
         times = times.to(device, non_blocking=True)
         events = events.to(device, non_blocking=True)
@@ -123,36 +130,57 @@ def run_epoch(model: nn.Module, loader: DataLoader, device: torch.device,
         all_events.append(events)
         all_risks.append(log_risks)
 
+    # Concatenate all predictions
     times_cat = torch.cat(all_times)
     events_cat = torch.cat(all_events)
     risks_cat = torch.cat(all_risks)
+    
+    # Compute metrics
     c_idx = concordance_index(times_cat, events_cat, risks_cat)
     avg_loss = total_loss / max(total_events, 1.0)
+    
+    # Reduce metrics across all processes in distributed training
+    if is_distributed:
+        avg_loss = reduce_tensor(torch.tensor(avg_loss, device=device), op='mean').item()
+        c_idx = reduce_tensor(torch.tensor(c_idx, device=device), op='mean').item()
+        
+        # Synchronize all processes
+        synchronize_distributed()
     
     if return_collections:
         return avg_loss, c_idx, times_cat, events_cat, risks_cat
     return avg_loss, c_idx
 
 
-def setup_model_and_optimizer(args, device: torch.device):
+def setup_model_and_optimizer(args, device: torch.device, is_distributed: bool = False):
     """
-    Setup model, optimizer, scheduler, and optional multi-GPU support.
+    Setup model, optimizer, scheduler, and multi-GPU support.
     
     Args:
         args: Parsed command line arguments
         device: Device to run on
+        is_distributed: Whether running in distributed mode
     
     Returns:
         Tuple of (model, optimizer, scheduler)
     """
     model = load_model(args.resnet, args.init, args.pretrained_path, device)
     
-    if torch.cuda.device_count() > 1:
+    # Setup multi-GPU support
+    if is_distributed:
+        # Use DistributedDataParallel for distributed training
+        model = setup_ddp_model(model, device)
+        print(f"Using DistributedDataParallel on device {device}")
+    elif torch.cuda.device_count() > 1:
+        # Use DataParallel for single-node multi-GPU
         print(f"Using {torch.cuda.device_count()} GPUs with DataParallel.")
         model = DataParallel(model)
-    model = model.to(device)
+        model = model.to(device)
+    else:
+        model = model.to(device)
 
-    if args.compile:
+    # Enable torch.compile if requested
+    if getattr(args, 'compile', False):
         try:
             model = torch.compile(model, mode='max-autotune')
             print('Enabled torch.compile')

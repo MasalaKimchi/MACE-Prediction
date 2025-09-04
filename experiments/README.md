@@ -1,400 +1,308 @@
 # Experiments
 
-This folder contains experiment configurations and templates for survival analysis experiments.
+This directory contains structured experiment management for pretraining and fine-tuning with organized output, YAML configurations, and proper checkpoint storage.
 
-## Overview
-
-The experiments module provides a comprehensive framework for configuring and running survival analysis experiments. It includes template experiments, configuration management, and experiment tracking capabilities.
-
-## Available Components
-
-### Template Experiments
-
-#### survival_analysis/template_experiment/
-
-A complete template experiment setup with:
-
-- **config.yaml**: YAML-based experiment configuration
-- **run_experiment.py**: Config-driven training script
-- **README.md**: Experiment-specific documentation
-
-## Experiment Structure
+## 📁 Directory Structure
 
 ```
 experiments/
-├── survival_analysis/
-│   ├── template_experiment/
-│   │   ├── config.yaml          # Experiment configuration
-│   │   ├── run_experiment.py    # Training script
-│   │   └── README.md           # Experiment documentation
-│   └── my_experiment/          # Your custom experiment
-│       ├── config.yaml
-│       ├── run_experiment.py
-│       └── README.md
+├── experiment_utils.py              # Experiment management utilities
+├── manage_experiments.py            # CLI for managing experiments
+├── run_pretraining_experiment.py    # Run pretraining experiments
+├── run_finetuning_experiment.py     # Run fine-tuning experiments
+├── pretraining_experiment/
+│   └── config.yaml                  # Pretraining experiment template
+├── finetuning_experiment/
+│   └── config.yaml                  # Fine-tuning experiment template
+└── [experiment_name]/               # Individual experiment results
+    ├── configs/
+    │   └── config.yaml              # Experiment configuration
+    ├── checkpoints/
+    │   ├── checkpoint_best.pth      # Best model checkpoint
+    │   ├── checkpoint_epoch_*.pth   # Epoch checkpoints
+    │   └── final_model.pth          # Final trained model
+    ├── logs/
+    │   └── tensorboard/             # TensorBoard logs
+    ├── results/
+    │   └── results.json             # Final results and metrics
+    └── artifacts/                   # Additional artifacts (plots, etc.)
 ```
 
-## Configuration System
+## 🚀 Quick Start
 
-### YAML Configuration
+### 1. Run Pretraining Experiment
 
-The `config.yaml` file provides comprehensive configuration for all aspects of the experiment:
+```bash
+# Using template config
+python experiments/run_pretraining_experiment.py \
+    --config experiments/pretraining_experiment/config.yaml \
+    --auto_name
+
+# With custom experiment name
+python experiments/run_pretraining_experiment.py \
+    --config experiments/pretraining_experiment/config.yaml \
+    --experiment_name "my_pretrain_experiment"
+```
+
+### 2. Run Fine-tuning Experiment
+
+```bash
+# Using template config
+python experiments/run_finetuning_experiment.py \
+    --config experiments/finetuning_experiment/config.yaml \
+    --auto_name
+
+# With custom experiment name
+python experiments/run_finetuning_experiment.py \
+    --config experiments/finetuning_experiment/config.yaml \
+    --experiment_name "my_finetune_experiment"
+```
+
+### 3. Manage Experiments
+
+```bash
+# List all experiments
+python experiments/manage_experiments.py list
+
+# Show experiment details
+python experiments/manage_experiments.py show pretrain_resnet18_features_20240101_120000
+
+# Compare two experiments
+python experiments/manage_experiments.py compare exp1 exp2
+
+# Clean up experiments (keep checkpoints)
+python experiments/manage_experiments.py cleanup exp1 exp2
+
+# Clean up experiments (remove checkpoints too)
+python experiments/manage_experiments.py cleanup exp1 exp2 --remove-checkpoints
+```
+
+## 📝 Configuration
+
+### Pretraining Configuration
+
+Edit `experiments/pretraining_experiment/config.yaml`:
 
 ```yaml
-# Experiment metadata
-experiment:
-  name: "survival_analysis_experiment"
-  description: "3D ResNet survival analysis on medical imaging data"
-  tags: ["survival", "medical_imaging", "resnet3d"]
-
 # Dataset configuration
 dataset:
-  train_csv: "data/train.csv"
-  val_csv: "data/val.csv"
-  test_csv: "data/test.csv"
-  image_col: "image_path"
-  time_col: "survival_time"
-  event_col: "event"
-  cache_rate: 0.1
-  batch_size: 8
-  num_workers: 4
+  csv_path: "data/dataset.csv"
+  fold_column: "Fold_1"
+  train_fold: "train"
+  val_fold: "val"
+  feature_cols: ["Age", "AgatstonScore2D", "MassScore"]
+  image_size: [256, 256, 64]
 
 # Model configuration
 model:
-  architecture: "resnet3d"
-  model_name: "resnet18"
-  input_channels: 1
-  num_classes: 1
-  pretrained: false
-  dropout_rate: 0.1
+  architecture: "resnet18"  # resnet18, resnet34, resnet50, resnet101, resnet152
+  num_classes: 3  # Number of features to predict
 
 # Training configuration
 training:
+  batch_size: 24
+  epochs: 1000
+  learning_rate: 1e-4
+  amp: true  # Mixed precision
+```
+
+### Fine-tuning Configuration
+
+Edit `experiments/finetuning_experiment/config.yaml`:
+
+```yaml
+# Dataset configuration
+dataset:
+  csv_path: "data/dataset.csv"
+  fold_column: "Fold_1"
+  train_fold: "train"
+  val_fold: "val"
+  time_col: "time"
+  event_col: "event"
+
+# Model configuration
+model:
+  architecture: "resnet18"
+  init_mode: "pretrained"
+  pretrained_path: "experiments/pretrain_experiment/checkpoints/final_model.pth"
+
+# Training configuration
+training:
+  batch_size: 24
   epochs: 100
   learning_rate: 1e-4
-  weight_decay: 1e-5
-  optimizer: "adamw"
-  scheduler: "cosine"
-  gradient_clipping:
-    enabled: true
-    max_norm: 1.0
-
-# Loss configuration
-loss:
-  type: "cox"
-  reduction: "mean"
-  eps: 1e-8
-
-# Metrics configuration
-metrics:
-  - "c_index"
-  - "brier_score"
-  - "td_auc"
-  time_points: [30, 90, 180, 365]
-
-# Augmentation configuration
-augmentation:
-  type: "medium"
-  spatial:
-    rotation_range: 15
-    translation_range: 0.1
-    scale_range: 0.1
-    flip_prob: 0.5
-  intensity:
-    noise_prob: 0.3
-    noise_std: 0.1
-
-# Logging configuration
-logging:
-  log_dir: "logs"
-  tensorboard: true
-  wandb:
-    enabled: false
-    project: "survival_analysis"
-    entity: "your_entity"
-
-# Output configuration
-output:
-  model_dir: "models"
-  checkpoint_dir: "checkpoints"
-  results_dir: "results"
-  save_best: true
-  save_last: true
+  amp: true
 ```
 
-## Running Experiments
+## 🔧 Experiment Management
 
-### Basic Usage
+### ExperimentManager Class
 
-1. **Copy Template Experiment**:
-```bash
-cp -r experiments/survival_analysis/template_experiment experiments/survival_analysis/my_experiment
-```
-
-2. **Edit Configuration**:
-```bash
-nano experiments/survival_analysis/my_experiment/config.yaml
-```
-
-3. **Run Experiment**:
-```bash
-cd experiments/survival_analysis/my_experiment
-python run_experiment.py --config config.yaml
-```
-
-### Advanced Usage
-
-#### Command Line Arguments
-
-```bash
-python run_experiment.py \
-    --config config.yaml \
-    --gpu 0 \
-    --resume checkpoint.pth \
-    --eval-only \
-    --seed 42
-```
-
-#### Programmatic Usage
+The `ExperimentManager` class provides structured experiment organization:
 
 ```python
-from experiments.survival_analysis.template_experiment.run_experiment import run_experiment
+from experiments.experiment_utils import ExperimentManager
 
-# Run experiment programmatically
-results = run_experiment(
-    config_path='config.yaml',
-    gpu_id=0,
-    resume_path=None,
-    eval_only=False,
-    seed=42
-)
-```
+# Create experiment
+exp_manager = ExperimentManager("my_experiment")
 
-## Experiment Tracking
+# Save configuration
+config_path = exp_manager.save_config(config_dict)
 
-### TensorBoard Integration
-
-```yaml
-# config.yaml
-logging:
-  tensorboard: true
-  log_dir: "logs"
-  log_interval: 100
-```
-
-View results:
-```bash
-tensorboard --logdir logs
-```
-
-### Weights & Biases Integration
-
-```yaml
-# config.yaml
-logging:
-  wandb:
-    enabled: true
-    project: "survival_analysis"
-    entity: "your_entity"
-    tags: ["survival", "medical_imaging"]
-```
-
-### Custom Logging
-
-```python
-# Custom logging in run_experiment.py
-import logging
-
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('experiment.log'),
-        logging.StreamHandler()
-    ]
-)
-```
-
-## Experiment Management
-
-### Experiment Registry
-
-```python
-from experiments import ExperimentRegistry
-
-# Register experiment
-registry = ExperimentRegistry()
-registry.register_experiment(
-    name="my_experiment",
-    config_path="config.yaml",
-    status="running"
+# Save checkpoint
+checkpoint_path = exp_manager.save_checkpoint(
+    model, optimizer, epoch, metrics, is_best=True
 )
 
-# List experiments
-experiments = registry.list_experiments()
+# Save final model
+final_model_path = exp_manager.save_final_model(model, final_metrics)
+
+# Save results
+results_path = exp_manager.save_results(results_dict)
 ```
 
-### Experiment Comparison
+### Automatic Experiment Naming
 
 ```python
-from experiments import ExperimentComparator
+from experiments.experiment_utils import create_experiment_name
 
-# Compare experiments
-comparator = ExperimentComparator()
-results = comparator.compare_experiments(
-    experiment_ids=["exp1", "exp2", "exp3"],
-    metrics=["c_index", "brier_score"]
-)
+# Generate automatic names
+name1 = create_experiment_name('pretrain', 'resnet50', 'dataset1')
+# Result: "pretrain_resnet50_dataset1_20240101_120000"
+
+name2 = create_experiment_name('finetune', 'resnet18', timestamp=False)
+# Result: "finetune_resnet18"
 ```
 
-## Configuration Validation
+## 📊 Output Structure
 
-### Schema Validation
+### Checkpoint Format
+
+Checkpoints include comprehensive metadata:
 
 ```python
-from experiments import ConfigValidator
-
-# Validate configuration
-validator = ConfigValidator()
-is_valid, errors = validator.validate_config("config.yaml")
-
-if not is_valid:
-    print(f"Configuration errors: {errors}")
+{
+    'epoch': 100,
+    'model_state_dict': {...},
+    'optimizer_state_dict': {...},
+    'metrics': {
+        'train_loss': 0.0234,
+        'val_loss': 0.0289,
+        'c_index': 0.756
+    },
+    'experiment_metadata': {
+        'name': 'my_experiment',
+        'created_at': '2024-01-01T12:00:00',
+        'status': 'running'
+    },
+    'is_best': True,
+    'timestamp': '2024-01-01T12:30:00'
+}
 ```
 
-### Default Configuration
+### Results Format
+
+Results are saved as JSON with metadata:
 
 ```python
-from experiments import DefaultConfig
-
-# Get default configuration
-default_config = DefaultConfig.get_default_config()
-print(default_config)
+{
+    'experiment_metadata': {...},
+    'timestamp': '2024-01-01T12:30:00',
+    'results': {
+        'final_metrics': {
+            'c_index': 0.756,
+            'ibs': 0.123,
+            'td_auc': [0.712, 0.734, 0.756, 0.768, 0.771]
+        },
+        'best_epoch': 87,
+        'training_time': '2h 15m 30s'
+    }
+}
 ```
 
-## Experiment Templates
+## 🔄 Workflow Integration
 
-### Survival Analysis Template
-
-The template experiment includes:
-
-- **Complete Configuration**: All necessary parameters
-- **Training Script**: Ready-to-run training code
-- **Documentation**: Detailed README
-- **Best Practices**: Optimized settings
-
-### Custom Templates
-
-Create custom templates for specific use cases:
+### Complete Pretraining → Fine-tuning Workflow
 
 ```bash
-# Create custom template
-mkdir -p experiments/survival_analysis/custom_template
-cp -r experiments/survival_analysis/template_experiment/* experiments/survival_analysis/custom_template/
+# 1. Pretrain model
+python experiments/run_pretraining_experiment.py \
+    --config experiments/pretraining_experiment/config.yaml \
+    --auto_name
+
+# 2. Update fine-tuning config with pretrained model path
+# Edit experiments/finetuning_experiment/config.yaml:
+# model.pretrained_path: "experiments/pretrain_resnet18_dataset_20240101_120000/checkpoints/final_model.pth"
+
+# 3. Fine-tune model
+python experiments/run_finetuning_experiment.py \
+    --config experiments/finetuning_experiment/config.yaml \
+    --auto_name
 ```
 
-## Best Practices
-
-### Configuration Management
-
-1. **Version Control**: Keep config files in version control
-2. **Documentation**: Document all configuration parameters
-3. **Validation**: Validate configurations before running
-4. **Backup**: Backup successful configurations
-
-### Experiment Organization
-
-1. **Naming Convention**: Use descriptive experiment names
-2. **Folder Structure**: Organize experiments by project/study
-3. **Documentation**: Document experiment purpose and results
-4. **Reproducibility**: Ensure experiments are reproducible
-
-### Performance Optimization
-
-1. **Resource Management**: Monitor GPU/CPU usage
-2. **Checkpointing**: Save checkpoints regularly
-3. **Early Stopping**: Use early stopping to prevent overfitting
-4. **Hyperparameter Tuning**: Use systematic hyperparameter search
-
-## Integration Examples
-
-### With Training Scripts
+### Using Pretrained Models
 
 ```python
-# In run_experiment.py
-from dataloaders import SurvivalDataset
-from architectures import ResNet3D
-from losses import CoxLoss
-from metrics import SurvivalEvaluator
+# Load pretrained model for fine-tuning
+import torch
+from experiments.experiment_utils import load_experiment_config
 
-# Load configuration
-config = load_config('config.yaml')
+# Load experiment config
+config = load_experiment_config("experiments/pretrain_experiment")
 
-# Create components
-dataset = SurvivalDataset(config['dataset'])
-model = ResNet3D(config['model'])
-loss_fn = CoxLoss(config['loss'])
-evaluator = SurvivalEvaluator(config['metrics'])
+# Load pretrained checkpoint
+checkpoint_path = "experiments/pretrain_experiment/checkpoints/final_model.pth"
+checkpoint = torch.load(checkpoint_path, map_location='cpu')
 
-# Training loop
-for epoch in range(config['training']['epochs']):
-    # Training code here
-    pass
+# Extract model weights
+model_state_dict = checkpoint['model_state_dict']
 ```
 
-### With External Tools
+## 🧹 Cleanup and Maintenance
 
-```python
-# Integration with external tools
-from experiments import ExternalToolIntegration
+### List Experiments
 
-# Weights & Biases
-wandb_integration = ExternalToolIntegration.wandb()
-wandb_integration.init(config)
-
-# MLflow
-mlflow_integration = ExternalToolIntegration.mlflow()
-mlflow_integration.log_experiment(config, results)
+```bash
+python experiments/manage_experiments.py list
 ```
 
-## Testing
+### Clean Up Old Experiments
 
-### Configuration Tests
+```bash
+# Keep checkpoints, remove logs
+python experiments/manage_experiments.py cleanup old_exp1 old_exp2
 
-```python
-# Test configuration loading
-def test_config_loading():
-    from experiments import load_config
-    
-    config = load_config('config.yaml')
-    assert 'experiment' in config
-    assert 'dataset' in config
-    assert 'model' in config
+# Remove everything including checkpoints
+python experiments/manage_experiments.py cleanup old_exp1 old_exp2 --remove-checkpoints
 ```
 
-### Experiment Tests
+### Compare Experiments
 
-```python
-# Test experiment execution
-def test_experiment_execution():
-    from experiments.survival_analysis.template_experiment.run_experiment import run_experiment
-    
-    # Run with test configuration
-    results = run_experiment('test_config.yaml')
-    assert results is not None
+```bash
+python experiments/manage_experiments.py compare exp1 exp2
 ```
 
-## Dependencies
+## 📈 Monitoring and Logging
 
-- **PyYAML**: YAML configuration parsing
-- **PyTorch**: Deep learning framework
-- **TensorBoard**: Experiment logging
-- **Weights & Biases**: Experiment tracking (optional)
-- **MLflow**: Experiment management (optional)
+- **TensorBoard**: Logs are saved in `experiments/[name]/logs/`
+- **Checkpoints**: Saved in `experiments/[name]/checkpoints/`
+- **Results**: Final metrics saved in `experiments/[name]/results/`
+- **Configs**: All configurations saved in `experiments/[name]/configs/`
 
-## References
+## 🎯 Best Practices
 
-- [YAML Configuration](https://yaml.org/)
-- [TensorBoard](https://www.tensorflow.org/tensorboard)
-- [Weights & Biases](https://wandb.ai/)
-- [MLflow](https://mlflow.org/)
+1. **Use descriptive experiment names** or enable `--auto_name`
+2. **Save configurations** for reproducibility
+3. **Monitor experiments** with TensorBoard
+4. **Clean up regularly** to save disk space
+5. **Compare experiments** to understand performance differences
+6. **Use structured output** for easy result analysis
+
+## 🔗 Integration with Existing Scripts
+
+The experiment system integrates seamlessly with existing pretraining and fine-tuning scripts:
+
+- **Pretraining**: `pretrain_scripts/pretrain_features_distributed.py`
+- **Fine-tuning**: `finetune_scripts/finetune_survival_distributed.py`
+- **Multi-GPU**: All distributed training features are preserved
+- **Fold-based splitting**: Compatible with single CSV approach

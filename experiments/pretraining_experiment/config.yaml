@@ -1,0 +1,74 @@
+# Pretraining Experiment Configuration
+# Template for 3D ResNet feature prediction experiments
+
+# Experiment metadata
+experiment:
+  name: "pretrain_resnet18_all_features"
+  type: "pretraining"
+  description: "Pretrain 3D ResNet to predict all 72 radiomic features from CT images"
+  created_at: "2024-01-01T00:00:00"
+
+# Dataset configuration
+dataset:
+  csv_path: "data/UH_1950_calc_09x03x2025.xlsx"
+  fold_column: "Fold_1"
+  train_fold: "train"
+  val_fold: "val"
+  nifti_col: "NIFTI Path"
+  feature_cols: null  # Use all features except nifti, time, event, fold_column (72 features total)
+  image_size: [256, 256, 64]
+  use_smart_cache: true
+  cache_rate: 0.5
+  replace_rate: 0.5
+  augment: true
+
+# Model configuration
+model:
+  architecture: "resnet18"  # resnet18, resnet34, resnet50, resnet101, resnet152
+  in_channels: 1
+  num_classes: 72  # Number of features to predict (all available features)
+  init_mode: "random"  # random, pretrained
+  pretrained_path: ""
+
+# Training configuration
+training:
+  batch_size: 4  # Total batch size across all GPUs
+  epochs: 50
+  learning_rate: 1e-4
+  weight_decay: 1e-5
+  optimizer: "adamw"  # adamw, adam, sgd
+  scheduler: "cosine"  # cosine, cosine_warm_restarts, onecycle, none
+  eta_min: 1e-7
+  max_grad_norm: 1.0
+  amp: true  # Mixed precision
+  compile: false  # torch.compile
+
+# Multi-GPU configuration
+distributed:
+  world_size: null  # Auto-detect all available GPUs
+  backend: "nccl"  # nccl, gloo
+  num_workers: null  # Auto-optimize
+
+# DataLoader configuration
+dataloader:
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4
+
+# Logging configuration
+logging:
+  tensorboard: true
+  log_interval: 2  # Log every N epochs
+  save_interval: 5  # Save checkpoint every N epochs
+
+# Evaluation configuration
+evaluation:
+  metrics: ["mse", "mae", "r2"]  # Metrics to compute
+  eval_interval: 2  # Evaluate every N epochs
+
+# Output configuration
+output:
+  save_best: true
+  save_final: true
+  save_interval: 5
+  keep_last_n: 1  # Keep last N checkpoints

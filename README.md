@@ -79,6 +79,8 @@ SurvivalProject/
 - **Pretraining Pipeline**: Complete pretraining workflow with feature prediction and checkpoint management
 - **Advanced Optimization**: Mixed precision training, AdamW optimizer, cosine annealing, gradient clipping
 - **Performance Optimizations**: torch.compile support, efficient data loading, memory optimization
+- **Multi-GPU Training**: Distributed Data Parallel (DDP) support with MONAI optimizations
+- **Smart Caching**: MONAI SmartCacheDataset for efficient memory management across GPUs
 
 ## Installation
 
@@ -137,8 +139,7 @@ python pretrain_scripts/pretrain_features.py \
 #### Fine-tuning with Optimizations
 ```bash
 python finetune_scripts/finetune_survival.py \
-    --train_csv data/train.csv \
-    --val_csv data/val.csv \
+    --csv_path data/dataset.csv \
     --resnet resnet18 \
     --batch_size 6 \
     --epochs 50 \
@@ -152,8 +153,7 @@ python finetune_scripts/finetune_survival.py \
 #### Fine-tuning with Pretrained Weights
 ```bash
 python finetune_scripts/finetune_survival.py \
-    --train_csv data/train.csv \
-    --val_csv data/val.csv \
+    --csv_path data/dataset.csv \
     --resnet resnet18 \
     --init pretrained \
     --pretrained_path pretrain_logs/pretrained_resnet.pth \
@@ -165,9 +165,86 @@ python finetune_scripts/finetune_survival.py \
     --max_grad_norm 1.0
 ```
 
-### Feature Scaling and Pretraining
+#### Multi-GPU Distributed Training (Auto-Detects GPUs)
 
-The project includes a comprehensive feature scaling system for radiomic features:
+**Quick Start:**
+```bash
+# Super simple - just specify your data, everything else is auto-detected!
+python finetune_scripts/quick_start_multi_gpu.py \
+    --csv_path data/dataset.csv
+
+# Or with custom settings (auto-detects all available GPUs)
+python finetune_scripts/launch_distributed_training.py \
+    --csv_path data/dataset.csv \
+    --resnet resnet50 \
+    --batch_size 32 \
+    --epochs 100 \
+    --amp \
+    --use_smart_cache
+
+# Direct distributed script (also auto-detects GPUs)
+python finetune_scripts/finetune_survival_distributed.py \
+    --csv_path data/dataset.csv \
+    --resnet resnet50 \
+    --batch_size 32 \
+    --epochs 100 \
+    --amp \
+    --use_smart_cache
+```
+
+**Structured Experiments (Recommended):**
+```bash
+# Run fine-tuning experiment with organized output
+python experiments/run_finetuning_experiment.py \
+    --config experiments/finetuning_experiment/config.yaml \
+    --auto_name
+
+# Results saved in: experiments/finetune_resnet18_dataset_20240101_120000/
+# ├── configs/config.yaml
+# ├── checkpoints/final_model.pth
+# ├── logs/tensorboard/
+# └── results/results.json
+```
+
+### Pretraining and Feature Scaling
+
+The project includes pretraining capabilities and a comprehensive feature scaling system for radiomic features:
+
+#### Pretraining (Feature Prediction)
+
+**Quick Start:**
+```bash
+# Super simple pretraining (auto-detects GPUs)
+python pretrain_scripts/quick_start_pretraining.py \
+    --csv_path data/dataset.csv \
+    --feature_cols Age AgatstonScore2D MassScore
+
+# Multi-GPU distributed pretraining
+python pretrain_scripts/launch_distributed_pretraining.py \
+    --csv_path data/dataset.csv \
+    --feature_cols Age AgatstonScore2D MassScore \
+    --resnet resnet50 \
+    --batch_size 32 \
+    --epochs 1000 \
+    --amp \
+    --use_smart_cache
+```
+
+**Structured Experiments (Recommended):**
+```bash
+# Run pretraining experiment with organized output
+python experiments/run_pretraining_experiment.py \
+    --config experiments/pretraining_experiment/config.yaml \
+    --auto_name
+
+# Results saved in: experiments/pretrain_resnet18_dataset_20240101_120000/
+# ├── configs/config.yaml
+# ├── checkpoints/final_model.pth
+# ├── logs/tensorboard/
+# └── results/results.json
+```
+
+#### Feature Scaling System
 
 #### Pretraining with Feature Scaling
 ```bash
@@ -288,6 +365,7 @@ Each major folder contains its own README.md with detailed documentation:
 - **[experiments/README.md](experiments/README.md)**: Experiment configurations and templates
 - **[pretrain_scripts/README.md](pretrain_scripts/README.md)**: Pre-training scripts and utilities
 - **[finetune_scripts/README.md](finetune_scripts/README.md)**: Fine-tuning scripts and utilities
+- **[finetune_scripts/README_MULTI_GPU.md](finetune_scripts/README_MULTI_GPU.md)**: Multi-GPU training guide
 - **[tests/README.md](tests/README.md)**: Testing documentation and guidelines
 
 ## Contributing
@@ -311,6 +389,62 @@ This project is inspired by and follows the architectural patterns from:
 - **[SegFormer3D](https://github.com/OSUPCVLab/SegFormer3D)**: Official Implementation of SegFormer3D: an Efficient Transformer for 3D Medical Image Segmentation (CVPR/W 2024)
 - **[torchsurv](https://github.com/autonlab/torchsurv)**: Survival analysis library for PyTorch
 - **[MONAI](https://monai.io/)**: Medical imaging AI toolkit for 3D image processing
+
+## 🧪 Experiment Management
+
+The project includes a comprehensive experiment management system for organized results, configurations, and checkpoints:
+
+### Structured Experiments
+
+```bash
+# List all experiments
+python experiments/manage_experiments.py list
+
+# Show experiment details
+python experiments/manage_experiments.py show pretrain_resnet18_features_20240101_120000
+
+# Compare experiments
+python experiments/manage_experiments.py compare exp1 exp2
+
+# Clean up experiments
+python experiments/manage_experiments.py cleanup old_exp1 old_exp2
+```
+
+### Experiment Structure
+
+Each experiment creates a structured directory:
+
+```
+experiments/pretrain_resnet18_dataset_20240101_120000/
+├── configs/
+│   └── config.yaml              # Complete experiment configuration
+├── checkpoints/
+│   ├── checkpoint_best.pth      # Best model checkpoint
+│   ├── checkpoint_epoch_*.pth   # Epoch checkpoints
+│   └── final_model.pth          # Final trained model
+├── logs/
+│   └── tensorboard/             # TensorBoard logs
+├── results/
+│   └── results.json             # Final results and metrics
+└── artifacts/                   # Additional artifacts
+```
+
+### Complete Workflow
+
+```bash
+# 1. Pretrain model
+python experiments/run_pretraining_experiment.py \
+    --config experiments/pretraining_experiment/config.yaml \
+    --auto_name
+
+# 2. Fine-tune model (using pretrained weights)
+python experiments/run_finetuning_experiment.py \
+    --config experiments/finetuning_experiment/config.yaml \
+    --auto_name
+
+# 3. Manage experiments
+python experiments/manage_experiments.py list
+```
 
 ## License
 

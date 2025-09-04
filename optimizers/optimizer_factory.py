@@ -125,19 +125,25 @@ def create_optimizer_and_scheduler(
     Returns:
         Tuple of (optimizer, scheduler)
     """
+    # Separate optimizer and scheduler parameters
+    optimizer_kwargs = {k: v for k, v in kwargs.items() 
+                       if k not in ['eta_min', 'T_0', 'T_mult', 'max_lr', 'steps_per_epoch', 'pct_start', 'anneal_strategy']}
+    scheduler_kwargs = {k: v for k, v in kwargs.items() 
+                       if k in ['eta_min', 'T_0', 'T_mult', 'max_lr', 'steps_per_epoch', 'pct_start', 'anneal_strategy']}
+    
     optimizer = create_optimizer(
         model_params,
         optimizer_name=optimizer_name,
         lr=lr,
         weight_decay=weight_decay,
-        **kwargs
+        **optimizer_kwargs
     )
     
     scheduler = create_scheduler(
         optimizer,
         scheduler_name=scheduler_name,
         epochs=epochs,
-        **kwargs
+        **scheduler_kwargs
     )
     
     return optimizer, scheduler

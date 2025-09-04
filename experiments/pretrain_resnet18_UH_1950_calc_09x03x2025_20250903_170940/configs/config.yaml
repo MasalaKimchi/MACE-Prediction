@@ -1,0 +1,60 @@
+dataloader:
+  persistent_workers: true
+  pin_memory: true
+  prefetch_factor: 4
+dataset:
+  augment: true
+  cache_rate: 0.5
+  csv_path: data/UH_1950_calc_09x03x2025.xlsx
+  feature_cols: null
+  fold_column: Fold_1
+  image_size:
+  - 256
+  - 256
+  - 64
+  nifti_col: NIFTI Path
+  replace_rate: 0.5
+  train_fold: train
+  use_smart_cache: true
+  val_fold: val
+distributed:
+  backend: nccl
+  num_workers: null
+  world_size: null
+evaluation:
+  eval_interval: 2
+  metrics:
+  - mse
+  - mae
+  - r2
+experiment:
+  created_at: '2024-01-01T00:00:00'
+  description: Pretrain 3D ResNet to predict all 72 radiomic features from CT images
+  name: pretrain_resnet18_UH_1950_calc_09x03x2025_20250903_170940
+  type: pretraining
+logging:
+  log_interval: 2
+  save_interval: 5
+  tensorboard: true
+model:
+  architecture: resnet18
+  in_channels: 1
+  init_mode: random
+  num_classes: 72
+  pretrained_path: ''
+output:
+  keep_last_n: 1
+  save_best: true
+  save_final: true
+  save_interval: 5
+training:
+  amp: true
+  batch_size: 4
+  compile: false
+  epochs: 50
+  eta_min: 1e-7
+  learning_rate: 1e-4
+  max_grad_norm: 1.0
+  optimizer: adamw
+  scheduler: cosine
+  weight_decay: 1e-5

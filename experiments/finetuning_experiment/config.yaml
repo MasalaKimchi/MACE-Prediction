@@ -1,0 +1,86 @@
+# Fine-tuning Experiment Configuration
+# Template for survival analysis experiments
+
+# Experiment metadata
+experiment:
+  name: "finetune_resnet18_survival"
+  type: "finetuning"
+  description: "Fine-tune 3D ResNet for MACE survival prediction"
+  created_at: "2024-01-01T00:00:00"
+
+# Dataset configuration
+dataset:
+  csv_path: "data/dataset.csv"
+  fold_column: "Fold_1"
+  train_fold: "train"
+  val_fold: "val"
+  nifti_col: "NIFTI path"
+  time_col: "time"
+  event_col: "event"
+  feature_cols: null  # Use all except nifti, time, event, fold_column
+  categorical_cols: null  # Auto-detect
+  numerical_cols: null  # Auto-detect
+  image_size: [256, 256, 64]
+  use_smart_cache: true
+  cache_rate: 0.5
+  replace_rate: 0.5
+  augment: true
+
+# Model configuration
+model:
+  architecture: "resnet18"  # resnet18, resnet34, resnet50, resnet101, resnet152
+  in_channels: 1
+  num_classes: 1  # Single output for Cox regression
+  init_mode: "pretrained"  # random, pretrained
+  pretrained_path: "experiments/pretraining_experiment/checkpoints/final_model.pth"
+  freeze_epochs: 0  # Freeze encoder for N warmup epochs
+
+# Training configuration
+training:
+  batch_size: 24  # Total batch size across all GPUs
+  epochs: 100
+  learning_rate: 1e-4
+  weight_decay: 1e-5
+  optimizer: "adamw"  # adamw, adam, sgd
+  scheduler: "cosine"  # cosine, cosine_warm_restarts, onecycle, none
+  eta_min: 1e-7
+  max_grad_norm: 1.0
+  amp: true  # Mixed precision
+  compile: false  # torch.compile
+
+# Multi-GPU configuration
+distributed:
+  world_size: null  # Auto-detect all available GPUs
+  backend: "nccl"  # nccl, gloo
+  num_workers: null  # Auto-optimize
+
+# DataLoader configuration
+dataloader:
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 4
+
+# Logging configuration
+logging:
+  tensorboard: true
+  log_interval: 5  # Log every N epochs
+  save_interval: 10  # Save checkpoint every N epochs
+
+# Evaluation configuration
+evaluation:
+  eval_years: [1, 2, 3, 4, 5]  # Years at which to compute metrics
+  metrics: ["c_index", "ibs", "td_auc"]  # Metrics to compute
+  eval_interval: 5  # Evaluate every N epochs
+
+# Output configuration
+output:
+  save_best: true
+  save_final: true
+  save_interval: 10
+  keep_last_n: 5  # Keep last N checkpoints
+
+# Survival analysis specific
+survival:
+  loss_type: "cox_ph"  # cox_ph, deep_surv
+  risk_stratification: true
+  calibration: true

@@ -1,28 +1,59 @@
 # Pretraining Scripts
 
-This directory contains scripts for pretraining 3D ResNet models on feature prediction tasks.
+This directory contains scripts for pretraining 3D ResNet models on feature prediction tasks with multi-GPU support.
 
 ## Structure
 
-- `pretrain_features.py` - Main pretraining script for feature prediction
+- `pretrain_features.py` - Main pretraining script for feature prediction (single-GPU)
+- `pretrain_features_distributed.py` - Distributed pretraining script with DDP support
+- `launch_distributed_pretraining.py` - Launch script for distributed pretraining
+- `quick_start_pretraining.py` - Super simple pretraining script (auto-detects everything)
 
 ## Usage
 
-### Basic Pretraining
+### 1. Super Simple (Recommended)
 ```bash
+# Just specify your data and features - everything else is auto-detected!
+python quick_start_pretraining.py \
+    --csv_path data/dataset.csv \
+    --feature_cols Age AgatstonScore2D MassScore
+```
+
+### 2. Basic Pretraining (Single-GPU)
+```bash
+# Use all available features (recommended)
 python pretrain_features.py \
-    --csv_path path/to/data.csv \
-    --feature_cols feature1 feature2 feature3 \
+    --csv_path data/dataset.csv \
+    --resnet resnet18 \
+    --epochs 1000 \
+    --batch_size 8
+
+# Or specify specific features
+python pretrain_features.py \
+    --csv_path data/dataset.csv \
+    --feature_cols Age AgatstonScore2D MassScore \
     --resnet resnet18 \
     --epochs 1000 \
     --batch_size 8
 ```
 
-### Advanced Pretraining with Optimizations
+### 3. Multi-GPU Distributed Pretraining
 ```bash
+# Launch distributed pretraining (auto-detects all GPUs, uses all features)
+python launch_distributed_pretraining.py \
+    --csv_path data/dataset.csv \
+    --resnet resnet50 \
+    --batch_size 32 \
+    --epochs 1000 \
+    --amp \
+    --use_smart_cache
+```
+
+### 4. Advanced Pretraining with Optimizations
+```bash
+# Use all features with advanced optimizations
 python pretrain_features.py \
-    --csv_path path/to/data.csv \
-    --feature_cols feature1 feature2 feature3 \
+    --csv_path data/dataset.csv \
     --resnet resnet50 \
     --epochs 1000 \
     --batch_size 8 \
@@ -39,15 +70,19 @@ python pretrain_features.py \
 
 ## Key Features
 
+- **Auto-Feature Detection**: By default, uses ALL available features from your CSV (no need to specify long feature lists!)
 - **Feature Prediction**: Learns to predict clinical/radiomic features from 3D medical images
 - **MSE Loss**: Uses mean squared error for regression task
 - **Scalable**: Designed for large datasets (100,000+ images)
 - **Memory Efficient**: Configurable caching and batch processing
-- **Multi-GPU Support**: Automatic DataParallel for multiple GPUs
+- **Multi-GPU Support**: Distributed Data Parallel (DDP) for multiple GPUs
+- **Fold-based Splitting**: Uses single CSV with Fold_1 column for train/val split
 - **Feature Scaling**: Proper Z-score normalization with scaler persistence
 - **Complete Checkpoints**: Saves model weights, scaler, and metadata together
 - **Advanced Optimization**: Mixed precision training, AdamW optimizer, cosine annealing
 - **Performance Optimizations**: Gradient clipping, torch.compile, efficient data loading
+- **Auto-Detection**: Automatically detects available GPUs and optimizes settings
+- **MONAI Integration**: SmartCacheDataset for efficient memory management
 
 ## Output
 
@@ -116,13 +151,23 @@ is_valid = validate_feature_scaling(normalized_features)
 ## Data Format
 
 The CSV file should contain:
-- DICOM path column
-- Feature columns to predict
+- **"NIFTI path"** column with image file paths
+- **"Fold_1"** column with values "train" and "val" for splitting
+- **Feature columns** to predict (e.g., Age, AgatstonScore2D, MassScore)
 - Any other metadata columns
 
 Example:
 ```csv
-dicom_path,feature1,feature2,feature3,other_metadata
-/path/to/image1.dcm,0.5,1.2,0.8,metadata1
-/path/to/image2.dcm,0.3,0.9,1.1,metadata2
+NIFTI path,Fold_1,Age,AgatstonScore2D,MassScore,other_metadata
+/path/to/image1.nii.gz,train,65,150.5,25.3,metadata1
+/path/to/image2.nii.gz,val,72,89.2,18.7,metadata2
+/path/to/image3.nii.gz,train,58,203.1,31.2,metadata3
 ```
+
+## Multi-GPU Training Benefits
+
+- **Automatic GPU Detection**: Uses all available GPUs by default
+- **Distributed Data Parallel**: Efficient gradient synchronization across GPUs
+- **Smart Caching**: MONAI SmartCacheDataset for optimal memory usage
+- **Scalable**: Handles large datasets with multiple GPUs
+- **Easy Launch**: Simple scripts with auto-detection and optimization

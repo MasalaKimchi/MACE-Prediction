@@ -30,8 +30,10 @@ from metrics_utils import (
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Fine-tune 3D ResNet for survival prediction (CoxPH).")
-    parser.add_argument('--train_csv', type=str, required=True, help='Training CSV path')
-    parser.add_argument('--val_csv', type=str, required=True, help='Validation CSV path')
+    parser.add_argument('--csv_path', type=str, required=True, help='CSV path with Fold_1 column for train/val split')
+    parser.add_argument('--fold_column', type=str, default='Fold_1', help='Column name for fold split (default: Fold_1)')
+    parser.add_argument('--train_fold', type=str, default='train', help='Value in fold column for training data (default: train)')
+    parser.add_argument('--val_fold', type=str, default='val', help='Value in fold column for validation data (default: val)')
     parser.add_argument('--resnet', type=str, default='resnet18', 
                        choices=['resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152'], 
                        help='ResNet architecture')
@@ -80,9 +82,16 @@ def create_dataloaders(args):
         use_cache=False, 
         augment=True
     )
-    train_ds = MonaiSurvivalDataset(csv_path=args.train_csv, **common_ds_kwargs)
+    train_ds = MonaiSurvivalDataset(
+        csv_path=args.csv_path,
+        fold_column=args.fold_column,
+        fold_value=args.train_fold,
+        **common_ds_kwargs
+    )
     val_ds = MonaiSurvivalDataset(
-        csv_path=args.val_csv, 
+        csv_path=args.csv_path,
+        fold_column=args.fold_column,
+        fold_value=args.val_fold,
         **{**common_ds_kwargs, 'augment': False}
     )
 

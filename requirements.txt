@@ -1,7 +1,9 @@
-torch
-monai
+torch>=2.0.0
+monai>=1.3.0
 polars
 pandas
 numpy
 scikit-learn
-pydicom 
+pydicom
+tensorboard
+tqdm 
