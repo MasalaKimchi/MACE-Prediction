@@ -22,6 +22,8 @@ try:
 except Exception:
     TSAuc = None
 
+from .survival_utils import estimate_breslow_baseline, baseline_cumhaz_at
+
 
 @torch.no_grad()
 def concordance_index(times: torch.Tensor, events: torch.Tensor, risks: torch.Tensor) -> float:
@@ -152,7 +154,7 @@ def integrated_brier_score(times: torch.Tensor, events: torch.Tensor, S_probs: t
     return float((area / torch.clamp(total_time, min=1e-12)).item())
 
 
-def time_dependent_auc(times: torch.Tensor, events: torch.Tensor, risks: torch.Tensor, 
+def time_dependent_auc(times: torch.Tensor, events: torch.Tensor, risks: torch.Tensor,
                       t_eval: torch.Tensor, G_of_t: Callable) -> torch.Tensor:
     """
     Dynamic AUC at times t_eval using IPCW.
@@ -201,3 +203,28 @@ def time_dependent_auc(times: torch.Tensor, events: torch.Tensor, risks: torch.T
         den = Wij.sum()
         aucs[k] = (num / torch.clamp(den, min=1e-12)).to(times.dtype)
     return aucs
+
+
+@torch.no_grad()
+def cox_survival_matrix(
+    log_risks: torch.Tensor,
+    events: torch.Tensor,
+    times: torch.Tensor,
+    time_grid: torch.Tensor,
+) -> torch.Tensor:
+    """Compute S(t|x) for a Cox model using Breslow baseline on a grid.
+
+    Args:
+        log_risks: (N,) log-risk scores.
+        events: (N,) event indicators.
+        times: (N,) observed times.
+        time_grid: (T,) grid of times at which to evaluate survival.
+
+    Returns:
+        (N, T) survival probability matrix.
+    """
+    event_times, H0 = estimate_breslow_baseline(times, events, log_risks)
+    H_t = baseline_cumhaz_at(event_times, H0, time_grid)
+    S0 = torch.exp(-H_t)  # (T,)
+    # S(t|x) = S0(t) ** exp(r)
+    return torch.pow(S0.unsqueeze(0), torch.exp(log_risks).unsqueeze(1))
