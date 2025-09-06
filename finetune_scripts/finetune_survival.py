@@ -33,9 +33,17 @@ def parse_args():
     parser.add_argument('--fold_column', type=str, default='Fold_1', help='Column name for fold split (default: Fold_1)')
     parser.add_argument('--train_fold', type=str, default='train', help='Value in fold column for training data (default: train)')
     parser.add_argument('--val_fold', type=str, default='val', help='Value in fold column for validation data (default: val)')
-    parser.add_argument('--resnet', type=str, default='resnet18', 
-                       choices=['resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152'], 
+    parser.add_argument('--resnet', type=str, default='resnet18',
+                       choices=['resnet18', 'resnet34', 'resnet50', 'resnet101', 'resnet152'],
                        help='ResNet architecture')
+    parser.add_argument('--img_encoder', type=str, default='resnet3d',
+                       choices=['resnet3d', 'swin3d'],
+                       help='Image encoder type')
+    parser.add_argument('--tab_encoder', type=str, default='mlp',
+                       choices=['mlp', 'ft_transformer'],
+                       help='Tabular encoder type')
+    parser.add_argument('--embed_dim', type=int, default=128,
+                       help='Shared embedding dimension')
     parser.add_argument('--image_size', type=int, nargs=3, default=[256, 256, 64], 
                        help='Image size (D, H, W)')
     parser.add_argument('--batch_size', type=int, default=6, help='Batch size')
@@ -196,9 +204,12 @@ def main():
 
     # Create dataloaders
     train_loader, val_loader = create_dataloaders(args)
+    args.tab_dim = train_loader.dataset[0][0].shape[0]
 
     # Setup model, optimizer, and scheduler
-    model, optimizer, scheduler = setup_model_and_optimizer(args, device)
+    model, optimizer, scheduler = setup_model_and_optimizer(
+        args, device, tabular_dim=args.tab_dim
+    )
     
     # Create mixed precision scaler
     scaler = torch.cuda.amp.GradScaler(enabled=args.amp) if args.amp else None

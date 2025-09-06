@@ -15,7 +15,7 @@ import torch.distributed as dist
 from torch.nn.parallel import DataParallel, DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Sampler
 
-from architectures import build_network, build_multimodal_network
+from architectures import build_multimodal_network
 from losses import cox_ph_loss, concordance_pairwise_loss, time_aware_triplet_loss
 from metrics.survival_metrics import cindex_torchsurv
 from optimizers import create_optimizer_and_scheduler
@@ -205,38 +205,35 @@ def build_global_risk_tensors(
     return tuple(gathered)  # type: ignore[return-value]
 
 
-def load_model(resnet_type: str, init_mode: str, pretrained_path: str, device: torch.device) -> nn.Module:
-    """
-    Load model for fine-tuning with optional pretrained weights.
-    
-    Args:
-        resnet_type: Type of ResNet architecture
-        init_mode: 'random' or 'pretrained'
-        pretrained_path: Path to pretrained checkpoint
-        device: Device to load model on
-    
-    Returns:
-        Loaded model ready for fine-tuning
-    """
-    # Output 1 log-risk value per sample
-    model = build_network(resnet_type=resnet_type, in_channels=1, num_classes=1)
+def load_model(
+    img_encoder: str,
+    tab_encoder: str,
+    resnet_type: str,
+    init_mode: str,
+    pretrained_path: str,
+    device: torch.device,
+    tabular_dim: int,
+    embed_dim: int,
+) -> nn.Module:
+    """Build multimodal model with optional pretrained image weights."""
 
-    if init_mode == 'pretrained':
+    model = build_multimodal_network(
+        img_encoder=img_encoder,
+        tab_encoder=tab_encoder,
+        resnet_type=resnet_type,
+        in_channels=1,
+        tabular_dim=tabular_dim,
+        embed_dim=embed_dim,
+    )
+
+    if init_mode == "pretrained":
         if not pretrained_path or not os.path.exists(pretrained_path):
             raise FileNotFoundError(f"Pretrained checkpoint not found: {pretrained_path}")
-        
+
         checkpoint = torch.load(pretrained_path, map_location=device)
-        
-        # Handle both old format (just state_dict) and new format (with scaler)
-        if isinstance(checkpoint, dict) and 'model_state_dict' in checkpoint:
-            model.load_state_dict(checkpoint['model_state_dict'], strict=False)
-            print(f"Loaded pretrained encoder weights from {pretrained_path}")
-            if 'feature_scaler' in checkpoint:
-                print(f"Note: Feature scaler available in checkpoint (not used in fine-tuning)")
-        else:
-            # Old format - just state dict
-            model.load_state_dict(checkpoint, strict=False)
-            print(f"Loaded pretrained encoder weights from {pretrained_path}")
+        state_dict = checkpoint.get("model_state_dict", checkpoint)
+        model.image_encoder.load_state_dict(state_dict, strict=False)
+        print(f"Loaded pretrained encoder weights from {pretrained_path}")
 
     return model
 
@@ -363,7 +360,9 @@ def run_epoch(
     return avg_loss, c_idx
 
 
-def setup_model_and_optimizer(args, device: torch.device, is_distributed: bool = False):
+def setup_model_and_optimizer(
+    args, device: torch.device, is_distributed: bool = False, tabular_dim: int | None = None
+):
     """
     Setup model, optimizer, scheduler, and multi-GPU support.
     
@@ -375,7 +374,17 @@ def setup_model_and_optimizer(args, device: torch.device, is_distributed: bool =
     Returns:
         Tuple of (model, optimizer, scheduler)
     """
-    model = load_model(args.resnet, args.init, args.pretrained_path, device)
+    tab_dim = tabular_dim if tabular_dim is not None else getattr(args, "tab_dim", 0)
+    model = load_model(
+        args.img_encoder,
+        args.tab_encoder,
+        args.resnet,
+        args.init,
+        args.pretrained_path,
+        device,
+        tab_dim,
+        args.embed_dim,
+    )
     
     # Setup multi-GPU support
     if is_distributed:
