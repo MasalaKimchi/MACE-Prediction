@@ -39,12 +39,27 @@ training:
   amp: false  # Mixed precision
   compile: false  # torch.compile
 
+# Loss configuration
+loss:
+  weights:
+    cox: 1.0
+    cpl: 0.0
+    tmcl: 0.0
+  cpl:
+    temperature: 1.0
+  tmcl:
+    margin: 1.0
+
 # DataLoader configuration
 dataloader:
   num_workers: 8
   pin_memory: true
   persistent_workers: true
   prefetch_factor: 4
+
+# Sampler configuration
+sampler:
+  event_fraction: 0.5  # fraction of events per batch when using EventAwareBatchSampler
 
 # Evaluation configuration
 evaluation:

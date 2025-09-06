@@ -58,6 +58,38 @@ def concordance_index(times: torch.Tensor, events: torch.Tensor, risks: torch.Te
     return float(num / den) if den > 0 else 0.0
 
 
+@torch.no_grad()
+def uno_c_index(times: torch.Tensor, events: torch.Tensor, risks: torch.Tensor, tau: float) -> float:
+    """Uno's C-index with IPCW weighting.
+
+    Parameters
+    ----------
+    times : torch.Tensor
+        Observed times ``(N,)``.
+    events : torch.Tensor
+        Event indicators ``(N,)``.
+    risks : torch.Tensor
+        Predicted risk scores ``(N,)``.
+    tau : float
+        Truncation time for evaluation.
+    """
+    G = km_censoring(times, events)
+    t_i = times.unsqueeze(1)
+    t_j = times.unsqueeze(0)
+    e_i = events.unsqueeze(1)
+    mask = (t_i < t_j) & (t_i <= tau) & (e_i > 0.5)
+    if not mask.any():
+        return 0.0
+    r_i = risks.unsqueeze(1)
+    r_j = risks.unsqueeze(0)
+    w = 1.0 / (G(t_i[mask]) * G(torch.minimum(t_j[mask], torch.tensor(tau, device=times.device))))
+    concordant = (r_i > r_j).to(times.dtype)
+    ties = (r_i == r_j).to(times.dtype) * 0.5
+    num = (w * (concordant + ties)[mask]).sum()
+    den = w.sum()
+    return float((num / torch.clamp(den, min=1e-12)).item())
+
+
 def estimate_breslow_baseline(times: torch.Tensor, events: torch.Tensor, log_risks: torch.Tensor):
     """
     Estimate baseline cumulative hazard H0(t) via Breslow.

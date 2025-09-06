@@ -20,17 +20,24 @@ from torch.utils.tensorboard import SummaryWriter
 project_root = Path(__file__).parent.parent.parent.parent
 sys.path.append(str(project_root))
 
-from architectures import build_network
+from architectures import build_multimodal_network
 from dataloaders import MonaiSurvivalDataset
-from losses import cox_ph_loss
+from losses import (
+    cox_ph_loss,
+    concordance_pairwise_loss,
+    time_aware_triplet_loss,
+)
 from metrics import (
     concordance_index,
+    uno_c_index,
     estimate_breslow_baseline,
     predict_survival_probs,
     km_censoring,
+    brier_score_ipcw,
     integrated_brier_score,
-    time_dependent_auc
+    time_dependent_auc,
 )
+from samplers import EventAwareBatchSampler
 from optimizers import create_optimizer_and_scheduler
 
 
@@ -75,15 +82,32 @@ def create_dataloaders(config: dict) -> tuple:
     
     # DataLoader configuration
     dataloader_config = config['dataloader']
-    train_loader = DataLoader(
-        train_ds,
-        batch_size=config['training']['batch_size'],
-        shuffle=True,
-        num_workers=dataloader_config['num_workers'],
-        pin_memory=dataloader_config['pin_memory'],
-        persistent_workers=dataloader_config['persistent_workers'] and dataloader_config['num_workers'] > 0,
-        prefetch_factor=dataloader_config['prefetch_factor'] if dataloader_config['num_workers'] > 0 else None,
-    )
+    sampler_cfg = config.get('sampler')
+    if sampler_cfg is not None:
+        events = [d['event'] for d in train_ds.data]
+        batch_sampler = EventAwareBatchSampler(
+            events,
+            batch_size=config['training']['batch_size'],
+            event_fraction=sampler_cfg.get('event_fraction', 0.5),
+        )
+        train_loader = DataLoader(
+            train_ds,
+            batch_sampler=batch_sampler,
+            num_workers=dataloader_config['num_workers'],
+            pin_memory=dataloader_config['pin_memory'],
+            persistent_workers=dataloader_config['persistent_workers'] and dataloader_config['num_workers'] > 0,
+            prefetch_factor=dataloader_config['prefetch_factor'] if dataloader_config['num_workers'] > 0 else None,
+        )
+    else:
+        train_loader = DataLoader(
+            train_ds,
+            batch_size=config['training']['batch_size'],
+            shuffle=True,
+            num_workers=dataloader_config['num_workers'],
+            pin_memory=dataloader_config['pin_memory'],
+            persistent_workers=dataloader_config['persistent_workers'] and dataloader_config['num_workers'] > 0,
+            prefetch_factor=dataloader_config['prefetch_factor'] if dataloader_config['num_workers'] > 0 else None,
+        )
     
     val_loader = DataLoader(
         val_ds,
@@ -98,14 +122,15 @@ def create_dataloaders(config: dict) -> tuple:
     return train_loader, val_loader
 
 
-def create_model(config: dict, device: torch.device) -> nn.Module:
-    """Create and configure the model."""
+def create_model(config: dict, device: torch.device, feature_dim: int) -> nn.Module:
+    """Create and configure the multimodal model."""
     model_config = config['model']
-    
-    model = build_network(
-        resnet_type=model_config['architecture'],
+
+    model = build_multimodal_network(
+        image_arch=model_config['architecture'],
         in_channels=model_config['in_channels'],
-        num_classes=model_config['num_classes']
+        tabular_dim=feature_dim,
+        fusion_dim=128,
     )
     
     # Load pretrained weights if specified
@@ -135,8 +160,16 @@ def create_model(config: dict, device: torch.device) -> nn.Module:
     return model
 
 
-def run_epoch(model: nn.Module, loader: DataLoader, device: torch.device, 
-              optimizer=None, return_collections: bool = False, amp: bool = False):
+def run_epoch(
+    model: nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    optimizer=None,
+    return_collections: bool = False,
+    amp: bool = False,
+    loss_weights: dict | None = None,
+    loss_params: dict | None = None,
+):
     """Run one epoch of training or validation."""
     is_train = optimizer is not None
     total_loss = 0.0
@@ -152,9 +185,9 @@ def run_epoch(model: nn.Module, loader: DataLoader, device: torch.device,
     all_risks = []
 
     for batch in loader:
-        # Dataset returns: features, time, event, image, dicom_path
-        _, times, events, images, _ = batch
+        features, times, events, images, _ = batch
         images = images.to(device, non_blocking=True)
+        features = features.to(device, non_blocking=True)
         times = times.to(device, non_blocking=True)
         events = events.to(device, non_blocking=True)
 
@@ -162,8 +195,19 @@ def run_epoch(model: nn.Module, loader: DataLoader, device: torch.device,
             optimizer.zero_grad(set_to_none=True)
 
         with torch.cuda.amp.autocast(enabled=amp):
-            log_risks = model(images).squeeze(-1).squeeze(-1).squeeze(-1).squeeze(-1)
-            loss = cox_ph_loss(log_risks, times, events)
+            outputs = model(images, features)
+            log_risks = outputs["log_risk"]
+            lw = loss_weights or {"cox": 1.0}
+            lp = loss_params or {}
+            loss = torch.tensor(0.0, device=device, dtype=log_risks.dtype)
+            if lw.get("cox", 0.0) > 0:
+                loss = loss + lw["cox"] * cox_ph_loss(log_risks, times, events)
+            if lw.get("cpl", 0.0) > 0:
+                temp = lp.get("cpl", {}).get("temperature", 1.0)
+                loss = loss + lw["cpl"] * concordance_pairwise_loss(log_risks, times, events, temperature=temp)
+            if lw.get("tmcl", 0.0) > 0 and outputs.get("image_embed") is not None and outputs.get("tab_embed") is not None:
+                margin = lp.get("tmcl", {}).get("margin", 1.0)
+                loss = loss + lw["tmcl"] * time_aware_triplet_loss(outputs["image_embed"], outputs["tab_embed"], times, margin=margin)
 
         if is_train:
             loss.backward()
@@ -182,7 +226,7 @@ def run_epoch(model: nn.Module, loader: DataLoader, device: torch.device,
     risks_cat = torch.cat(all_risks)
     c_idx = concordance_index(times_cat, events_cat, risks_cat)
     avg_loss = total_loss / max(total_events, 1.0)
-    
+
     if return_collections:
         return avg_loss, c_idx, times_cat, events_cat, risks_cat
     return avg_loss, c_idx
@@ -206,9 +250,12 @@ def main():
     
     # Create dataloaders
     train_loader, val_loader = create_dataloaders(config)
-    
+
+    # Determine feature dimension from dataset
+    feature_dim = train_loader.dataset.data[0]["features"].shape[0]
+
     # Create model
-    model = create_model(config, device)
+    model = create_model(config, device, feature_dim)
     
     # Create optimizer and scheduler
     training_config = config['training']
@@ -246,13 +293,23 @@ def main():
         
         # Run epochs
         train_loss, train_c = run_epoch(
-            model, train_loader, device, optimizer, 
-            amp=training_config['amp'], scaler=scaler,
-            max_grad_norm=training_config.get('max_grad_norm', 1.0)
+            model,
+            train_loader,
+            device,
+            optimizer,
+            amp=training_config['amp'],
+            loss_weights=config['loss']['weights'],
+            loss_params=config['loss'],
         )
         val_loss, val_c, v_times, v_events, v_risks = run_epoch(
-            model, val_loader, device, optimizer=None, 
-            return_collections=True, amp=training_config['amp']
+            model,
+            val_loader,
+            device,
+            optimizer=None,
+            return_collections=True,
+            amp=training_config['amp'],
+            loss_weights=config['loss']['weights'],
+            loss_params=config['loss'],
         )
         
         # Step scheduler
@@ -261,16 +318,22 @@ def main():
         
         # Compute additional metrics
         v_event_times, v_H0 = estimate_breslow_baseline(v_times, v_events, v_risks)
-        t_eval = torch.tensor(config['evaluation']['eval_years'], device=v_times.device, dtype=v_times.dtype)
-        S_probs = predict_survival_probs(v_risks, v_event_times, v_H0, t_eval)
+        eval_years = torch.tensor(config['evaluation']['eval_years'], device=v_times.device, dtype=v_times.dtype)
+        S_probs = predict_survival_probs(v_risks, v_event_times, v_H0, eval_years)
         G_of_t = km_censoring(v_times, v_events)
-        ibs = integrated_brier_score(v_times, v_events, S_probs, t_eval, G_of_t)
-        td_auc = time_dependent_auc(v_times, v_events, v_risks, t_eval, G_of_t)
+        ibs = integrated_brier_score(v_times, v_events, S_probs, eval_years, G_of_t)
+        td_auc = time_dependent_auc(v_times, v_events, v_risks, eval_years, G_of_t)
         td_auc_str = ", ".join([f"{float(a):.3f}" for a in td_auc.cpu()])
+        brier_times = torch.tensor([1.0, 3.0, 5.0], device=v_times.device, dtype=v_times.dtype)
+        S_brier = predict_survival_probs(v_risks, v_event_times, v_H0, brier_times)
+        brier_vals = brier_score_ipcw(v_times, v_events, S_brier, brier_times, G_of_t)
+        brier_str = ", ".join([f"{float(v):.3f}" for v in brier_vals.cpu()])
+        uno_c = uno_c_index(v_times, v_events, v_risks, tau=float(brier_times[-1]))
         
         print(
             f"Epoch {epoch}/{training_config['epochs']} | Train Loss: {train_loss:.4f} C: {train_c:.4f} | "
-            f"Val Loss: {val_loss:.4f} C: {val_c:.4f} | IBS: {ibs:.4f} | tAUC@{config['evaluation']['eval_years']}: [{td_auc_str}]"
+            f"Val Loss: {val_loss:.4f} C: {val_c:.4f} | UnoC: {uno_c:.4f} | "
+            f"Brier@[1,3,5]: [{brier_str}] | IBS: {ibs:.4f} | tAUC@{config['evaluation']['eval_years']}: [{td_auc_str}]"
         )
         
         # Log metrics
@@ -279,9 +342,12 @@ def main():
             writer.add_scalar('Train/Cindex', train_c, epoch)
             writer.add_scalar('Val/Loss', val_loss, epoch)
             writer.add_scalar('Val/Cindex', val_c, epoch)
+            writer.add_scalar('Val/UnoC', uno_c, epoch)
             writer.add_scalar('Val/IBS', ibs, epoch)
             for i, t in enumerate(config['evaluation']['eval_years']):
                 writer.add_scalar(f'Val/tAUC@{t}', float(td_auc[i]), epoch)
+            for i, t in enumerate([1, 3, 5]):
+                writer.add_scalar(f'Val/Brier@{t}', float(brier_vals[i]), epoch)
         
         # Save best model
         if val_c > best_val_c:

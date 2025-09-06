@@ -4,6 +4,7 @@ Metrics for survival analysis evaluation.
 
 from .survival_metrics import (
     concordance_index,
+    uno_c_index,
     estimate_breslow_baseline,
     baseline_cumhaz_at,
     predict_survival_probs,
@@ -15,6 +16,7 @@ from .survival_metrics import (
 
 __all__ = [
     'concordance_index',
+    'uno_c_index',
     'estimate_breslow_baseline',
     'baseline_cumhaz_at',
     'predict_survival_probs',

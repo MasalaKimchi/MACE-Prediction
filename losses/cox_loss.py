@@ -1,7 +1,13 @@
 import torch
+from .ddp_utils import gather_tensor
 
 
-def cox_ph_loss(log_risks: torch.Tensor, times: torch.Tensor, events: torch.Tensor) -> torch.Tensor:
+def cox_ph_loss(
+    log_risks: torch.Tensor,
+    times: torch.Tensor,
+    events: torch.Tensor,
+    gather: bool = False,
+) -> torch.Tensor:
     """
     Breslow approximation for Cox partial likelihood.
     C-index explanation: compares all comparable patient pairs; a pair is concordant
@@ -13,6 +19,11 @@ def cox_ph_loss(log_risks: torch.Tensor, times: torch.Tensor, events: torch.Tens
     Returns:
         Negative partial log-likelihood (scalar)
     """
+    if gather:
+        log_risks = gather_tensor(log_risks)
+        times = gather_tensor(times)
+        events = gather_tensor(events)
+
     # Sort by descending time so that risk set for i is [0..i]
     order = torch.argsort(times, descending=True)
     log_risks = log_risks[order]
