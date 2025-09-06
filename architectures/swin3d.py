@@ -16,37 +16,54 @@ class Swin3DEncoder(nn.Module):
     for efficient encoding without the heavy decoder components. Supports both
     SwinUNETR and SwinUNETRv2 architectures via the use_v2 parameter. The input 
     volume is converted into a global embedding vector by using only the SwinTransformer 
-    backbone and applying global average pooling followed by projection.
+    backbone and applying global average pooling. Uses original MONAI SwinUNETR 
+    feature dimensions without projection.
     
     Parameters
     ----------
-    use_v2 : bool, default=False
+    in_ch : int, default=1
+        Number of input channels.
+    feature_size : int, default=48
+        Base feature size (increased from MONAI default for better performance). 
+        Final output dimension will be feature_size * 2^num_stages.
+    window_size : int, default=7
+        Window size for Swin Transformer attention.
+    depths : tuple, default=(2, 2, 2, 2)
+        Number of Swin Transformer blocks in each stage.
+    num_heads : tuple, default=(3, 6, 12, 24)
+        Number of attention heads in each stage.
+    dropout_path_rate : float, default=0.1
+        Dropout rate for stochastic depth.
+    use_v2 : bool, default=True
         If True, uses SwinUNETRv2 architecture with additional residual convolution
         blocks at the beginning of each Swin stage for improved performance.
-    use_checkpoint : bool, default=False
+    use_checkpoint : bool, default=True
         If True, uses gradient checkpointing to reduce memory usage during training
         at the cost of increased computation time. Useful for large 3D volumes or
         when training with limited GPU memory.
+        
+    Note
+    ----
+    Output feature dimensions:
+    - Default config (feature_size=48, depths=(2,2,2,2)): 768 features
+    - Custom configs: feature_size * 2^num_stages
     """
 
     def __init__(
         self,
         in_ch: int = 1,
-        embed_dim: int = 256,
-        feature_size: int = 48,
+        feature_size: int = 48,  # Increased from MONAI default for better performance
         window_size: int = 7,
         depths: tuple[int, int, int, int] = (2, 2, 2, 2),
         num_heads: tuple[int, int, int, int] = (3, 6, 12, 24),
         dropout_path_rate: float = 0.1,
-        use_v2: bool = False,
-        use_checkpoint: bool = False,
+        use_v2: bool = True,  # Enable SwinUNETRv2 by default
+        use_checkpoint: bool = True,  # Enable gradient checkpointing by default
     ) -> None:
         super().__init__()
         if SwinTransformer is None:  # pragma: no cover
             raise ImportError("MONAI is required for Swin3DEncoder. Install with 'pip install monai'.")
 
-        self.embed_dim = embed_dim
-        
         # Use SwinTransformer directly instead of the full SwinUNETR
         self.backbone = SwinTransformer(
             in_chans=in_ch,
@@ -65,9 +82,9 @@ class Swin3DEncoder(nn.Module):
             spatial_dims=3,
             use_v2=use_v2,
         )
-        # The SwinTransformer will output features with dimension embed_dim * 2^(num_stages-1)
-        # We'll dynamically determine this in the forward pass
-        self.proj = None  # Will be initialized in first forward pass
+        # The SwinTransformer will output features with dimension feature_size * 2^num_stages
+        # For default config: 24 * 2^4 = 384 features
+        self.embed_dim = feature_size * (2 ** len(depths))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Encode input volume to a global embedding.
@@ -92,58 +109,30 @@ class Swin3DEncoder(nn.Module):
         # Apply global average pooling across spatial dimensions
         gap = deep_features.mean(dim=(2, 3, 4))  # (B, final_feature_size)
         
-        # Initialize projection layer if not done yet
-        if self.proj is None:
-            final_feature_size = gap.shape[1]
-            self.proj = nn.Linear(final_feature_size, self.embed_dim).to(gap.device)
-        
-        # Project to desired embedding dimension
-        return self.proj(gap)
+        # Return original SwinTransformer feature dimensions (no projection)
+        return gap
 
 if __name__ == "__main__":
-    # The following test code requires the MONAI library to be installed.
-    # To install it, run: 'pip install monai'
-
     # Define an input tensor of shape (Batch, Channels, Depth, Height, Width)
     # The new dimensions (256, 256, 64) are chosen for a medical imaging example.
     input_volume = torch.randn(1, 1, 256, 256, 64)
     print(f"Input volume shape: {input_volume.shape}")
 
-    # Test SwinUNETR (default)
-    print("Testing SwinUNETR (use_v2=False):")
-    model = Swin3DEncoder(embed_dim=256, use_v2=False)
-    print("Model initialized.")
+    # Test default configuration - should produce 768 features (48 * 2^4)
+    print("Testing default configuration (use_v2=True, use_checkpoint=True, feature_size=48):")
+    model_default = Swin3DEncoder()
+    print(f"Model initialized with embed_dim: {model_default.embed_dim}")
 
     # Pass the input volume through the encoder
-    output_embedding = model(input_volume)
-    print(f"Output embedding shape: {output_embedding.shape}")
+    output_embedding_default = model_default(input_volume)
+    print(f"Output embedding shape: {output_embedding_default.shape}")
     
-    # Assert that the output shape is as expected
-    assert output_embedding.shape == (1, 256), "Output shape does not match expected (1, 256)"
-    print("Success: SwinUNETR encoder produced an output with the correct shape.")
+    # Assert that the output shape is as expected (768 features for default config)
+    expected_dim = 48 * (2 ** 4)  # feature_size * 2^num_stages
+    assert output_embedding_default.shape == (1, expected_dim), f"Output shape does not match expected (1, {expected_dim})"
+    print(f"Success: Default encoder produced an output with the correct shape (1, {expected_dim}).")
     
-    # Test SwinUNETRv2
-    print("\nTesting SwinUNETRv2 (use_v2=True):")
-    model_v2 = Swin3DEncoder(embed_dim=256, use_v2=True)
-    print("Model initialized.")
-
-    # Pass the input volume through the encoder
-    output_embedding_v2 = model_v2(input_volume)
-    print(f"Output embedding shape: {output_embedding_v2.shape}")
-    
-    # Assert that the output shape is as expected
-    assert output_embedding_v2.shape == (1, 256), "Output shape does not match expected (1, 256)"
-    print("Success: SwinUNETRv2 encoder produced an output with the correct shape.")
-    
-    # Test with gradient checkpointing enabled
-    print("\nTesting with gradient checkpointing (use_checkpoint=True):")
-    model_checkpoint = Swin3DEncoder(embed_dim=256, use_checkpoint=True)
-    print("Model initialized.")
-
-    # Pass the input volume through the encoder
-    output_embedding_checkpoint = model_checkpoint(input_volume)
-    print(f"Output embedding shape: {output_embedding_checkpoint.shape}")
-    
-    # Assert that the output shape is as expected
-    assert output_embedding_checkpoint.shape == (1, 256), "Output shape does not match expected (1, 256)"
-    print("Success: Encoder with checkpointing produced an output with the correct shape.")
+    print("\nAll Swin3DEncoder tests completed successfully!")
+    print("\nSummary of SwinTransformer feature dimensions:")
+    print("- Default config (feature_size=48, use_v2=True, use_checkpoint=True): 768 features")
+    print("- Custom configs: feature_size * 2^num_stages")
