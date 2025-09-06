@@ -5,25 +5,24 @@ This script has been refactored to use modular utility functions for better code
 
 import argparse
 import os
+import csv
+import json
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from dataloaders import MonaiSurvivalDataset
 from training_utils import (
-    setup_model_and_optimizer, 
-    run_epoch, 
+    setup_model_and_optimizer,
+    run_epoch,
     create_encoder_freeze_function,
     save_model_checkpoint
 )
-from survival_utils import (
-    estimate_breslow_baseline,
-    predict_survival_probs,
-    km_censoring
-)
-from metrics_utils import (
-    integrated_brier_score,
-    time_dependent_auc
+from metrics_utils import cox_survival_matrix
+from metrics.survival_metrics import (
+    cindex_torchsurv,
+    td_auc_torchsurv,
+    brier_ibs_torchsurv,
 )
 
 
@@ -119,38 +118,71 @@ def create_dataloaders(args):
 
 def evaluate_model(model, val_loader, device, args):
     """Evaluate model and compute survival metrics."""
-    val_loss, val_c, v_times, v_events, v_risks = run_epoch(
+    val_loss, _, v_times, v_events, v_risks = run_epoch(
         model, val_loader, device, optimizer=None, return_collections=True, amp=args.amp
     )
 
-    # Build baseline using validation set predictions
-    v_event_times, v_H0 = estimate_breslow_baseline(v_times, v_events, v_risks)
-    
-    # Evaluation grid: years -> same units as input times; assume times are in years
-    t_eval = torch.tensor(args.eval_years, device=v_times.device, dtype=v_times.dtype)
-    
-    # Survival probabilities using Cox model
-    S_probs = predict_survival_probs(v_risks, v_event_times, v_H0, t_eval)
-    
-    # IPCW using KM for censoring
-    G_of_t = km_censoring(v_times, v_events)
-    
-    # Compute metrics
-    ibs = integrated_brier_score(v_times, v_events, S_probs, t_eval, G_of_t)
-    td_auc = time_dependent_auc(v_times, v_events, v_risks, t_eval, G_of_t)
-    
-    return val_loss, val_c, ibs, td_auc
+    val_c = cindex_torchsurv(v_risks, v_events, v_times)
+
+    horizons = [1, 2, 3, 4, 5]
+    td_auc = td_auc_torchsurv(v_risks, v_events, v_times, horizons)
+
+    time_grid = torch.linspace(0, 5, steps=51, device=v_times.device, dtype=v_times.dtype)
+    surv_matrix = cox_survival_matrix(v_risks, v_events, v_times, time_grid)
+    brier_dict, ibs = brier_ibs_torchsurv(surv_matrix, v_events, v_times, time_grid)
+
+    return val_loss, val_c, td_auc, brier_dict, ibs
 
 
-def log_metrics(writer, epoch, train_loss, train_c, val_loss, val_c, ibs, td_auc, eval_years):
-    """Log metrics to tensorboard."""
+def log_metrics(
+    writer,
+    epoch,
+    train_loss,
+    train_c,
+    val_loss,
+    val_c,
+    td_auc,
+    brier_dict,
+    ibs,
+    log_dir,
+):
+    """Log metrics to TensorBoard and persist to CSV/JSON."""
+
     writer.add_scalar('Train/Loss', train_loss, epoch)
     writer.add_scalar('Train/Cindex', train_c, epoch)
     writer.add_scalar('Val/Loss', val_loss, epoch)
     writer.add_scalar('Val/Cindex', val_c, epoch)
-    writer.add_scalar('Val/IBS', ibs, epoch)
-    for i, t in enumerate(eval_years):
-        writer.add_scalar(f'Val/tAUC@{t}', float(td_auc[i]), epoch)
+    for h, v in td_auc.items():
+        writer.add_scalar(f'Val/tdAUC@{h}', v, epoch)
+    for h in [1, 3, 5]:
+        if h in brier_dict:
+            writer.add_scalar(f'Val/Brier@{h}', brier_dict[h], epoch)
+    writer.add_scalar('Val/IBS_0_5y', ibs, epoch)
+
+    metrics = {
+        'epoch': epoch,
+        'train_loss': float(train_loss),
+        'train_cindex': float(train_c),
+        'val_loss': float(val_loss),
+        'val_cindex': float(val_c),
+        'val_ibs_0_5y': float(ibs),
+    }
+    for h, v in td_auc.items():
+        metrics[f'val_td_auc@{int(h)}'] = float(v)
+    for h in [1, 3, 5]:
+        metrics[f'val_brier@{h}'] = float(brier_dict.get(h, float('nan')))
+
+    csv_path = os.path.join(log_dir, 'metrics.csv')
+    json_path = os.path.join(log_dir, 'metrics.json')
+    fieldnames = list(metrics.keys())
+    file_exists = os.path.exists(csv_path)
+    with open(csv_path, 'a', newline='') as f:
+        writer_csv = csv.DictWriter(f, fieldnames=fieldnames)
+        if not file_exists:
+            writer_csv.writeheader()
+        writer_csv.writerow(metrics)
+    with open(json_path, 'w') as f:
+        json.dump(metrics, f, indent=2)
 
 
 def main():
@@ -199,24 +231,25 @@ def main():
         )
         
         # Validation epoch
-        val_loss, val_c, ibs, td_auc = evaluate_model(model, val_loader, device, args)
+        val_loss, val_c, td_auc, brier_dict, ibs = evaluate_model(model, val_loader, device, args)
         
         # Step scheduler
         if scheduler is not None:
             scheduler.step()
         
         # Format time-dependent AUC for printing
-        td_auc_str = ", ".join([f"{float(a):.3f}" for a in td_auc.cpu()])
+        td_auc_str = ", ".join([f"{int(h)}:{auc:.3f}" for h, auc in td_auc.items()])
+        brier_str = ", ".join([f"{h}:{brier_dict.get(h, float('nan')):.3f}" for h in [1, 3, 5]])
 
         # Print progress
         print(
             f"Epoch {epoch}/{args.epochs} | Train Loss: {train_loss:.4f} C: {train_c:.4f} | "
             f"Val Loss: {val_loss:.4f} C: {val_c:.4f} | IBS: {ibs:.4f} | "
-            f"tAUC@{args.eval_years}: [{td_auc_str}]"
+            f"Brier@{{1,3,5}}: [{brier_str}] | tAUC: [{td_auc_str}]"
         )
-        
+
         # Log metrics
-        log_metrics(writer, epoch, train_loss, train_c, val_loss, val_c, ibs, td_auc, args.eval_years)
+        log_metrics(writer, epoch, train_loss, train_c, val_loss, val_c, td_auc, brier_dict, ibs, args.log_dir)
 
         # Save best model
         if val_c > best_val_c:

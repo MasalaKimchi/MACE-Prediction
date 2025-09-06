@@ -12,7 +12,7 @@ from torch.utils.data import DataLoader
 
 from architectures import build_network, build_multimodal_network
 from losses import cox_ph_loss, concordance_pairwise_loss, time_aware_triplet_loss
-from .metrics_utils import concordance_index
+from metrics.survival_metrics import cindex_torchsurv
 from optimizers import create_optimizer_and_scheduler
 from .distributed_utils import (
     setup_ddp_model, reduce_tensor, synchronize_distributed,
@@ -162,7 +162,7 @@ def run_epoch(
     risks_cat = torch.cat(all_risks)
     
     # Compute metrics
-    c_idx = concordance_index(times_cat, events_cat, risks_cat)
+    c_idx = cindex_torchsurv(risks_cat, events_cat, times_cat)
     avg_loss = total_loss / max(total_events, 1.0)
     
     # Reduce metrics across all processes in distributed training
