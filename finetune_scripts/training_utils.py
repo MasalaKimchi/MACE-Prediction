@@ -10,11 +10,11 @@ import torch.optim as optim
 from torch.nn.parallel import DataParallel, DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 
-from architectures import build_network
-from survival_utils import cox_ph_loss
-from metrics_utils import concordance_index
+from architectures import build_network, build_multimodal_network
+from losses import cox_ph_loss, concordance_pairwise_loss, time_aware_triplet_loss
+from .metrics_utils import concordance_index
 from optimizers import create_optimizer_and_scheduler
-from distributed_utils import (
+from .distributed_utils import (
     setup_ddp_model, reduce_tensor, synchronize_distributed,
     get_optimal_batch_size_per_gpu, get_optimal_num_workers
 )
@@ -56,9 +56,19 @@ def load_model(resnet_type: str, init_mode: str, pretrained_path: str, device: t
     return model
 
 
-def run_epoch(model: nn.Module, loader: DataLoader, device: torch.device, 
-              optimizer=None, return_collections: bool = False, amp: bool = False,
-              scaler=None, max_grad_norm: float = None, is_distributed: bool = False):
+def run_epoch(
+    model: nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    optimizer=None,
+    return_collections: bool = False,
+    amp: bool = False,
+    scaler=None,
+    max_grad_norm: float | None = None,
+    is_distributed: bool = False,
+    loss_weights: dict | None = None,
+    loss_params: dict | None = None,
+):
     """
     Run one epoch of training or validation with distributed training support.
     
@@ -92,10 +102,11 @@ def run_epoch(model: nn.Module, loader: DataLoader, device: torch.device,
 
     for batch in loader:
         # Dataset returns: features, time, event, image, dicom_path
-        _, times, events, images, _ = batch
-        
+        features, times, events, images, _ = batch
+
         # Move to device (non_blocking for better performance)
         images = images.to(device, non_blocking=True)
+        features = features.to(device, non_blocking=True)
         times = times.to(device, non_blocking=True)
         events = events.to(device, non_blocking=True)
 
@@ -103,8 +114,23 @@ def run_epoch(model: nn.Module, loader: DataLoader, device: torch.device,
             optimizer.zero_grad(set_to_none=True)
 
         with torch.cuda.amp.autocast(enabled=amp):
-            log_risks = model(images).squeeze(-1).squeeze(-1).squeeze(-1).squeeze(-1)
-            loss = cox_ph_loss(log_risks, times, events)
+            outputs = model(images, features)
+            log_risks = outputs["log_risk"]
+            lw = loss_weights or {"cox": 1.0}
+            lp = loss_params or {}
+            loss = torch.tensor(0.0, device=device, dtype=log_risks.dtype)
+            if lw.get("cox", 0.0) > 0:
+                loss = loss + lw["cox"] * cox_ph_loss(log_risks, times, events, gather=is_distributed)
+            if lw.get("cpl", 0.0) > 0:
+                temp = lp.get("cpl", {}).get("temperature", 1.0)
+                loss = loss + lw["cpl"] * concordance_pairwise_loss(
+                    log_risks, times, events, temperature=temp, gather=is_distributed
+                )
+            if lw.get("tmcl", 0.0) > 0 and outputs.get("image_embed") is not None and outputs.get("tab_embed") is not None:
+                margin = lp.get("tmcl", {}).get("margin", 1.0)
+                loss = loss + lw["tmcl"] * time_aware_triplet_loss(
+                    outputs["image_embed"], outputs["tab_embed"], times, margin=margin
+                )
 
         if is_train:
             if scaler is not None:
